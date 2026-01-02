@@ -1,0 +1,119 @@
+PLAN D'INTEGRATION BACKEND ↔ FRONTEND
+===========================================
+
+ETAT ACTUEL
+-----------
+✅ Backend : Complet (JWT, RBAC, Bons, Templates PDF, QR, Signatures)
+✅ Frontend : Structure de base (Shadcn UI, Thème, Multilingue, Pages Login/Dashboard)
+
+A FAIRE POUR LIER BACKEND ET FRONTEND
+--------------------------------------
+
+1. CREER UN SERVICE API CLIENT
+   Fichier : frontend/src/lib/api.ts
+   
+   Créer une classe ApiClient avec :
+   - Propriété baseURL pointant vers http://localhost:3333/api/v1
+   - Méthode request() privée qui gère les headers Authorization
+   - Méthodes publiques : login(), getMe(), getBons(), getBon(), createBon(), getBonTypes(), getTemplate(), saveTemplate(), createDefaultTemplate()
+   - Gérer le token depuis localStorage
+   - Envoyer le token dans le header Authorization: Bearer <token>
+
+2. VARIABLE D'ENVIRONNEMENT
+   Fichier : frontend/.env.local
+   
+   Contenu :
+   NEXT_PUBLIC_API_URL=http://localhost:3333/api/v1
+
+3. METTRE A JOUR LA PAGE LOGIN
+   Fichier : frontend/src/app/login/page.tsx
+   
+   Remplacer le fetch manuel par :
+   import { api } from '@/lib/api'
+   const data = await api.login(email, password)
+   localStorage.setItem('token', data.token)
+   localStorage.setItem('user', JSON.stringify(data.user))
+
+4. CREER UN HOOK D'AUTHENTIFICATION
+   Fichier : frontend/src/hooks/use-auth.ts
+   
+   Créer un hook useAuth() qui :
+   - Vérifie le token dans localStorage
+   - Appelle api.getMe() pour récupérer l'utilisateur
+   - Redirige vers /login si pas de token ou erreur
+   - Fournit user, loading, logout()
+
+5. METTRE A JOUR LE DASHBOARD
+   Fichier : frontend/src/app/dashboard/page.tsx
+   
+   Utiliser useAuth() et api.getBons() pour charger les données réelles
+
+6. CREER MIDDLEWARE DE PROTECTION
+   Fichier : frontend/src/middleware.ts
+   
+   Protéger les routes /dashboard, /bons, /templates, /configuration
+   Rediriger vers /login si pas de token
+
+7. CREER PAGE EDITION TEMPLATE PDF
+   Fichier : frontend/src/app/templates/[bonTypeId]/edit/page.tsx
+   
+   - Charger template via api.getTemplate(bonTypeId)
+   - Créer éditeur WYSIWYG (plus tard, pour l'instant juste formulaire basique)
+   - Sauvegarder via api.saveTemplate(bonTypeId, template)
+
+ENDPOINTS BACKEND DISPONIBLES
+-----------------------------
+Auth:
+POST   /api/v1/auth/login
+POST   /api/v1/auth/register
+GET    /api/v1/auth/me
+POST   /api/v1/auth/logout
+
+Bons:
+GET    /api/v1/bons
+GET    /api/v1/bons/:id
+POST   /api/v1/bons
+PUT    /api/v1/bons/:id
+POST   /api/v1/bons/:id/sign
+POST   /api/v1/bons/:id/approve
+POST   /api/v1/bons/:id/reject
+GET    /api/v1/bons/:id/pdf
+GET    /api/v1/bons/:id/pdf/download
+
+Bon Types:
+GET    /api/v1/bon-types
+GET    /api/v1/bon-types/:id
+POST   /api/v1/bon-types
+PUT    /api/v1/bon-types/:id
+
+Templates PDF:
+GET    /api/v1/bon-types/:bonTypeId/pdf-template
+POST   /api/v1/bon-types/:bonTypeId/pdf-template
+POST   /api/v1/bon-types/:bonTypeId/pdf-template/default
+POST   /api/v1/bon-types/:bonTypeId/pdf-template/preview
+POST   /api/v1/bon-types/:bonTypeId/pdf-template/duplicate
+
+Roles & Permissions:
+GET    /api/v1/roles
+POST   /api/v1/roles
+GET    /api/v1/permissions
+POST   /api/v1/permissions
+
+CHECKLIST
+---------
+[ ] Créer frontend/src/lib/api.ts
+[ ] Créer frontend/.env.local
+[ ] Mettre à jour frontend/src/app/login/page.tsx
+[ ] Créer frontend/src/hooks/use-auth.ts
+[ ] Mettre à jour frontend/src/app/dashboard/page.tsx
+[ ] Créer frontend/src/middleware.ts
+[ ] Créer page édition template
+
+POINTS IMPORTANTS
+-----------------
+- Token JWT : localStorage.getItem('token')
+- Header Authorization : Bearer <token>
+- Vérifier CORS backend pour localhost:3000
+- Rediriger vers /login si 401
+- Utiliser NEXT_PUBLIC_* pour variables d'environnement côté client
+

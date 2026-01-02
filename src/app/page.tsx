@@ -33,10 +33,10 @@ export default function Home() {
               <Link href="/dashboard" className="text-gray-700 dark:text-gray-300 hover:text-blue-600">
                 Dashboard
               </Link>
-              <Link href="/bons" className="text-gray-700 dark:text-gray-300 hover:text-blue-600">
+              <Link href="/dashboard/vouchers" className="text-gray-700 dark:text-gray-300 hover:text-blue-600">
                 Bons
               </Link>
-              <Link href="/configuration" className="text-gray-700 dark:text-gray-300 hover:text-blue-600">
+              <Link href="/dashboard/settings" className="text-gray-700 dark:text-gray-300 hover:text-blue-600">
                 Configuration
               </Link>
               <button className="btn btn-primary">

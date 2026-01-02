@@ -1,124 +1,159 @@
-'use client'
+"use client"
 
-import { useState, useEffect } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useLocale } from "@/contexts/locale-context"
+import { Ticket, Users, TrendingUp, DollarSign, Activity } from "lucide-react"
+import { DashboardShell } from "@/components/dashboard-shell"
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({
-    totalBons: 0,
-    pendingBons: 0,
-    signedBons: 0,
-    activeBons: 0,
-  })
+  const { t } = useLocale()
 
-  useEffect(() => {
-    // TODO: Charger les statistiques depuis l'API
-    setStats({
-      totalBons: 150,
-      pendingBons: 25,
-      signedBons: 100,
-      activeBons: 75,
-    })
-  }, [])
+  const stats = [
+    {
+      title: "Bons Actifs",
+      value: "1,234",
+      change: "+12.5%",
+      icon: Ticket,
+      color: "text-blue-500",
+      bgColor: "bg-blue-500/10",
+    },
+    {
+      title: "Utilisateurs",
+      value: "567",
+      change: "+8.2%",
+      icon: Users,
+      color: "text-green-500",
+      bgColor: "bg-green-500/10",
+    },
+    {
+      title: "Revenus",
+      value: "45,678 €",
+      change: "+23.1%",
+      icon: DollarSign,
+      color: "text-yellow-500",
+      bgColor: "bg-yellow-500/10",
+    },
+    {
+      title: "Transactions",
+      value: "8,901",
+      change: "+15.3%",
+      icon: Activity,
+      color: "text-purple-500",
+      bgColor: "bg-purple-500/10",
+    },
+  ]
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="container-responsive py-8">
-        <h1 className="text-3xl font-bold mb-8 text-gray-900 dark:text-white">
-          Dashboard
-        </h1>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="card bg-white dark:bg-gray-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Total Bons</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.totalBons}</p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <div className="card bg-white dark:bg-gray-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">En Attente</p>
-                <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pendingBons}</p>
-              </div>
-              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-yellow-600 dark:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <div className="card bg-white dark:bg-gray-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Signés</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.signedBons}</p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          <div className="card bg-white dark:bg-gray-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 dark:text-gray-400">Actifs</p>
-                <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.activeBons}</p>
-              </div>
-              <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Bons */}
-        <div className="card bg-white dark:bg-gray-800">
-          <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-            Bons Récents
-          </h2>
-          <div className="table-responsive">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Numéro</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Type</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Statut</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300">Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b border-gray-100 dark:border-gray-800">
-                  <td className="py-3 px-4 text-sm text-gray-900 dark:text-white">BON-000001</td>
-                  <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">Autorisation</td>
-                  <td className="py-3 px-4">
-                    <span className="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                      Signé
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-sm text-gray-600 dark:text-gray-400">31/12/2025</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+    <DashboardShell>
+      <div className="space-y-8 animate-fade-in">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">{t.dashboard.title}</h1>
+        <p className="text-muted-foreground mt-2">Vue d'ensemble de votre plateforme de bons numériques</p>
       </div>
-    </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {stats.map((stat, index) => (
+          <Card
+            key={index}
+            className="relative overflow-hidden transition-all duration-300 hover:shadow-lg hover:scale-105 border-border/50"
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
+              <div className={`${stat.bgColor} p-2 rounded-lg`}>
+                <stat.icon className={`h-4 w-4 ${stat.color}`} />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-foreground">{stat.value}</div>
+              <div className="flex items-center gap-1 mt-1">
+                <TrendingUp className="h-4 w-4 text-green-500" />
+                <p className="text-xs text-green-500 font-medium">{stat.change}</p>
+                <span className="text-xs text-muted-foreground">vs mois dernier</span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+        <Card className="col-span-4 border-border/50">
+          <CardHeader>
+            <CardTitle>Aperçu des Activités</CardTitle>
+            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
+          </CardHeader>
+          <CardContent className="pl-2">
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              Graphique des activités (à implémenter)
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="col-span-4 border-border/50">
+          <CardHeader>
+            <CardTitle>Aperçu des Activités</CardTitle>
+            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
+          </CardHeader>
+          <CardContent className="pl-2">
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              Graphique des activités (à implémenter)
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="col-span-4 border-border/50">
+          <CardHeader>
+            <CardTitle>Aperçu des Activités</CardTitle>
+            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
+          </CardHeader>
+          <CardContent className="pl-2">
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              Graphique des activités (à implémenter)
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="col-span-4 border-border/50">
+          <CardHeader>
+            <CardTitle>Aperçu des Activités</CardTitle>
+            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
+          </CardHeader>
+          <CardContent className="pl-2">
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              Graphique des activités (à implémenter)
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="col-span-4 border-border/50">
+          <CardHeader>
+            <CardTitle>Aperçu des Activités</CardTitle>
+            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
+          </CardHeader>
+          <CardContent className="pl-2">
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              Graphique des activités (à implémenter)
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="col-span-3 border-border/50">
+          <CardHeader>
+            <CardTitle>Activité Récente</CardTitle>
+            <CardDescription>Les dernières transactions de votre plateforme</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {[1, 2, 3, 4, 5].map((item) => (
+                <div key={item} className="flex items-center gap-4">
+                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                  <div className="flex-1 space-y-1">
+                    <p className="text-sm font-medium leading-none">Transaction #{item}234</p>
+                    <p className="text-sm text-muted-foreground">Il y a {item} minutes</p>
+                  </div>
+                  <div className="font-medium text-sm">+{item * 100} €</div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      </div>
+    </DashboardShell>
   )
 }
-
-
