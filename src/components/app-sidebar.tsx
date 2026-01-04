@@ -1,6 +1,7 @@
 "use client"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut } from "lucide-react"
+import Link from "next/link"
+import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -36,6 +37,11 @@ export function AppSidebar() {
       icon: Ticket,
     },
     {
+      title: "Types de bons",
+      href: "/dashboard/bon-types",
+      icon: Layers,
+    },
+    {
       title: t.nav.templates,
       href: "/dashboard/templates",
       icon: FileText,
@@ -46,6 +52,14 @@ export function AppSidebar() {
       icon: Users,
     },
   ]
+
+  // Fonction pour vérifier si une route est active (y compris les sous-routes)
+  const isActiveRoute = (href: string) => {
+    if (href === "/dashboard") {
+      return pathname === "/dashboard"
+    }
+    return pathname.startsWith(href)
+  }
 
   const handleLogout = () => {
     localStorage.removeItem("token")
@@ -77,15 +91,15 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
-                const isActive = pathname === item.href
+                const isActive = isActiveRoute(item.href)
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
-                      <a href={item.href} className="flex items-center gap-3">
+                      <Link href={item.href} className="flex items-center gap-3">
                         <item.icon className="size-4" />
                         <span>{item.title}</span>
                         {isActive && <ChevronRight className="ml-auto size-4" />}
-                      </a>
+                      </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )
@@ -99,11 +113,11 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={pathname === "/dashboard/settings"} tooltip={t.nav.configuration}>
-                  <a href="/dashboard/settings" className="flex items-center gap-3">
+                <SidebarMenuButton asChild isActive={isActiveRoute("/dashboard/settings")} tooltip={t.nav.configuration}>
+                  <Link href="/dashboard/settings" className="flex items-center gap-3">
                     <Settings className="size-4" />
                     <span>{t.nav.configuration}</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

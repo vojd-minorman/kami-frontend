@@ -9,6 +9,8 @@ import { Separator } from "@/components/ui/separator"
 import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbLink } from "@/components/ui/breadcrumb"
 import { UserNav } from "@/components/user-nav"
 import { NotificationsNav } from "@/components/notification-nav"
+import { useAuth } from "@/hooks/use-auth"
+import { Skeleton } from "@/components/ui/skeleton"
 
 function HeaderContent() {
   return (
@@ -52,6 +54,7 @@ function HeaderWrapper({ isScrolled }: { isScrolled: boolean }) {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [isScrolled, setIsScrolled] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+  const { user, loading } = useAuth()
 
   useEffect(() => {
     const handleScroll = () => {
@@ -69,6 +72,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return () => contentElement.removeEventListener("scroll", handleScroll)
     }
   }, [])
+
+  // Afficher un loader pendant la vérification de l'authentification
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="space-y-4 w-full max-w-md p-8">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      </div>
+    )
+  }
+
+  // Si pas d'utilisateur après le chargement, rediriger vers login
+  // (useAuth() devrait déjà avoir redirigé, mais on double la vérification)
+  if (!user) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login"
+    }
+    return null
+  }
 
   return (
     <SidebarProvider defaultOpen>

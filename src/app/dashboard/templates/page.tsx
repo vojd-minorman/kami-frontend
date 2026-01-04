@@ -13,39 +13,66 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Plus, Edit, Eye, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Plus, Edit, Eye, CheckCircle2, XCircle, FileText, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
+import { api, type BonType, type PDFTemplate } from '@/lib/api'
+import { useAuth } from '@/hooks/use-auth'
+import { DashboardShell } from '@/components/dashboard-shell'
 
-interface Template {
-  id: string
-  name: string
-  bonTypeId: string
-  bonTypeName: string
-  createdAt: string
+interface TemplateInfo {
+  bonType: BonType
+  hasTemplate: boolean
+  template?: PDFTemplate
 }
 
 export default function TemplatesPage() {
   const router = useRouter()
   const { t } = useLocale()
-  const [templates, setTemplates] = useState<Template[]>([])
+  const { user } = useAuth()
+  const [templates, setTemplates] = useState<TemplateInfo[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) {
-      router.push('/login')
-      return
+    if (user) {
+      loadTemplates()
     }
-
-    loadTemplates()
-  }, [router])
+  }, [user])
 
   const loadTemplates = async () => {
     try {
-      const token = localStorage.getItem('token')
-      // TODO: Appel API réel
-      // Pour l'instant, données de test
-      setTemplates([])
+      setLoading(true)
+      const bonTypes = await api.getBonTypes()
+      
+      // Pour chaque type de bon, vérifier s'il a un template (en parallèle mais avec gestion d'erreur)
+      const templatesInfo: TemplateInfo[] = await Promise.allSettled(
+        bonTypes.map(async (bonType) => {
+          try {
+            const template = await api.getTemplate(bonType.id)
+            return {
+              bonType,
+              hasTemplate: true,
+              template,
+            }
+          } catch (error: any) {
+            // Si le template n'existe pas, on retourne hasTemplate: false
+            return {
+              bonType,
+              hasTemplate: false,
+            }
+          }
+        })
+      ).then(results => 
+        results.map(result => 
+          result.status === 'fulfilled' ? result.value : {
+            bonType: bonTypes[results.indexOf(result)],
+            hasTemplate: false,
+          }
+        )
+      )
+      
+      setTemplates(templatesInfo)
     } catch (error) {
       console.error('Error loading templates:', error)
     } finally {
@@ -53,88 +80,166 @@ export default function TemplatesPage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t.templates.title}</h1>
-          <p className="text-muted-foreground">
-            Gérez vos templates PDF pour les bons
-          </p>
-        </div>
-        <Link href="/dashboard/templates/create">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            {t.templates.create}
-          </Button>
-        </Link>
-      </div>
+  const getTemplateStatusBadge = (hasTemplate: boolean) => {
+    if (hasTemplate) {
+      return (
+        <Badge variant="default" className="bg-green-500/10 text-green-500 border-green-500/20">
+          <CheckCircle2 className="h-3 w-3 mr-1" />
+          Template actif
+        </Badge>
+      )
+    }
+    return (
+      <Badge variant="outline" className="text-muted-foreground">
+        <XCircle className="h-3 w-3 mr-1" />
+        Aucun template
+      </Badge>
+    )
+  }
 
-      {/* Templates List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Liste des templates</CardTitle>
-          <CardDescription>
-            Tous les templates PDF configurés pour vos types de bons
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="text-center py-8">{t.common.loading}</p>
-          ) : templates.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground mb-4">
-                Aucun template trouvé
-              </p>
-              <Link href="/dashboard/templates/create">
-                <Button variant="outline">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Créer votre premier template
-                </Button>
-              </Link>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nom</TableHead>
-                  <TableHead>Type de bon</TableHead>
-                  <TableHead>Date de création</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {templates.map((template) => (
-                  <TableRow key={template.id}>
-                    <TableCell className="font-medium">{template.name}</TableCell>
-                    <TableCell>{template.bonTypeName}</TableCell>
-                    <TableCell>
-                      {new Date(template.createdAt).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Link href={`/dashboard/templates/${template.id}/edit`}>
-                          <Button variant="ghost" size="icon">
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </Link>
-                        <Button variant="ghost" size="icon">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+  return (
+    <DashboardShell>
+      <div className="space-y-4 md:space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{t.templates.title || 'Templates PDF'}</h1>
+            <p className="text-muted-foreground text-sm md:text-base mt-1">
+              Gérez les templates PDF pour chaque type de bon
+            </p>
+          </div>
+          <Link href="/dashboard/templates/create">
+            <Button className="w-full sm:w-auto">
+              <Plus className="mr-2 h-4 w-4" />
+              {t.templates.create || 'Créer un template'}
+            </Button>
+          </Link>
+        </div>
+
+        {/* Templates List */}
+        <Card className="border-border/50">
+          <CardHeader>
+            <CardTitle className="text-lg md:text-xl">Liste des templates PDF</CardTitle>
+            <CardDescription className="text-sm">
+              {templates.length > 0 
+                ? `${templates.length} type(s) de bon trouvé(s)` 
+                : 'Aucun type de bon'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="space-y-4 py-8">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center gap-4">
+                    <Skeleton className="h-12 flex-1" />
+                    <Skeleton className="h-10 w-24" />
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+              </div>
+            ) : templates.length === 0 ? (
+              <div className="text-center py-12">
+                <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                <p className="text-muted-foreground mb-4">
+                  Aucun type de bon trouvé
+                </p>
+                <Link href="/dashboard/templates/create">
+                  <Button variant="outline">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Créer votre premier template
+                  </Button>
+                </Link>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[200px]">Type de bon</TableHead>
+                      <TableHead className="min-w-[100px]">Code</TableHead>
+                      <TableHead className="min-w-[150px]">Statut du template</TableHead>
+                      <TableHead className="min-w-[200px]">Informations</TableHead>
+                      <TableHead className="text-right min-w-[150px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {templates.map((templateInfo) => (
+                      <TableRow key={templateInfo.bonType.id}>
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{templateInfo.bonType.name}</span>
+                            {templateInfo.bonType.description && (
+                              <span className="text-xs text-muted-foreground mt-1">
+                                {templateInfo.bonType.description}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {templateInfo.bonType.code}
+                        </TableCell>
+                        <TableCell>
+                          {getTemplateStatusBadge(templateInfo.hasTemplate)}
+                        </TableCell>
+                        <TableCell>
+                          {templateInfo.hasTemplate && templateInfo.template ? (
+                            <div className="text-sm text-muted-foreground space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span>Taille:</span>
+                                <span className="font-medium">{templateInfo.template.layout?.pageSize || 'N/A'}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span>Orientation:</span>
+                                <span className="font-medium capitalize">
+                                  {templateInfo.template.layout?.orientation || 'N/A'}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">
+                              Aucune information disponible
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            {(!templateInfo.bonType.fields || templateInfo.bonType.fields.length === 0) ? (
+                              <Link href={`/dashboard/bon-types/${templateInfo.bonType.id}/edit`}>
+                                <Button variant="outline" size="sm">
+                                  <AlertCircle className="h-4 w-4 mr-1" />
+                                  Configurer les champs
+                                </Button>
+                              </Link>
+                            ) : (
+                              <Link href={`/dashboard/templates/${templateInfo.bonType.id}/edit`}>
+                                <Button 
+                                  variant={templateInfo.hasTemplate ? "default" : "outline"} 
+                                  size="sm"
+                                >
+                                  {templateInfo.hasTemplate ? (
+                                    <>
+                                      <Edit className="h-4 w-4 mr-1" />
+                                      Modifier
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Plus className="h-4 w-4 mr-1" />
+                                      Créer
+                                    </>
+                                  )}
+                                </Button>
+                              </Link>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </DashboardShell>
   )
 }
-

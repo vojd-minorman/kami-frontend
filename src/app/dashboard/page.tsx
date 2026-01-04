@@ -1,155 +1,256 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useLocale } from "@/contexts/locale-context"
-import { Ticket, Users, TrendingUp, DollarSign, Activity } from "lucide-react"
+import { Ticket, TrendingUp, DollarSign, Activity } from "lucide-react"
 import { DashboardShell } from "@/components/dashboard-shell"
+import { useAuth } from "@/hooks/use-auth"
+import { api, type Bon } from "@/lib/api"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
 
 export default function DashboardPage() {
   const { t } = useLocale()
+  const { user } = useAuth()
+  const [loading, setLoading] = useState(true)
+  const [bons, setBons] = useState<Bon[]>([])
+  const [stats, setStats] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+  })
 
-  const stats = [
+  useEffect(() => {
+    const loadBons = async () => {
+      try {
+        setLoading(true)
+        const response = await api.getBons({ page: 1, limit: 100 })
+        setBons(response.data)
+        
+        // Calculer les statistiques
+        const statsData = {
+          total: response.meta.total,
+          pending: response.data.filter(b => b.status === 'DRAFT' || b.status === 'SUBMITTED').length,
+          approved: response.data.filter(b => b.status === 'VALIDATED' || b.status === 'SIGNED' || b.status === 'ACTIVE').length,
+          rejected: response.data.filter(b => b.status === 'CANCELLED').length,
+        }
+        setStats(statsData)
+      } catch (error) {
+        console.error("Erreur lors du chargement des bons:", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (user) {
+      loadBons()
+    }
+  }, [user])
+
+  const statsCards = [
     {
-      title: "Bons Actifs",
-      value: "1,234",
-      change: "+12.5%",
+      title: "Total des Bons",
+      value: stats.total.toLocaleString(),
+      change: "",
       icon: Ticket,
       color: "text-blue-500",
       bgColor: "bg-blue-500/10",
     },
     {
-      title: "Utilisateurs",
-      value: "567",
-      change: "+8.2%",
-      icon: Users,
-      color: "text-green-500",
-      bgColor: "bg-green-500/10",
-    },
-    {
-      title: "Revenus",
-      value: "45,678 €",
-      change: "+23.1%",
-      icon: DollarSign,
+      title: "En Attente",
+      value: stats.pending.toLocaleString(),
+      change: "",
+      icon: Activity,
       color: "text-yellow-500",
       bgColor: "bg-yellow-500/10",
     },
     {
-      title: "Transactions",
-      value: "8,901",
-      change: "+15.3%",
-      icon: Activity,
-      color: "text-purple-500",
-      bgColor: "bg-purple-500/10",
+      title: "Approuvés",
+      value: stats.approved.toLocaleString(),
+      change: "",
+      icon: TrendingUp,
+      color: "text-green-500",
+      bgColor: "bg-green-500/10",
+    },
+    {
+      title: "Rejetés",
+      value: stats.rejected.toLocaleString(),
+      change: "",
+      icon: DollarSign,
+      color: "text-red-500",
+      bgColor: "bg-red-500/10",
     },
   ]
 
+  const getStatusBadge = (status: string) => {
+    const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+      draft: { label: "Brouillon", variant: "outline" },
+      pending: { label: "En attente", variant: "secondary" },
+      signed: { label: "Signé", variant: "default" },
+      approved: { label: "Approuvé", variant: "default" },
+      rejected: { label: "Rejeté", variant: "destructive" },
+    }
+    const statusInfo = statusMap[status] || { label: status, variant: "outline" as const }
+    return <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+  }
+
   return (
     <DashboardShell>
-      <div className="space-y-8 animate-fade-in">
+      <div className="space-y-6 md:space-y-8 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">{t.dashboard.title}</h1>
-        <p className="text-muted-foreground mt-2">Vue d'ensemble de votre plateforme de bons numériques</p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">{t.dashboard.title}</h1>
+          <p className="text-muted-foreground mt-2 text-sm md:text-base">Vue d'ensemble de votre plateforme de bons numériques</p>
       </div>
 
+        {loading ? (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="border-border/50">
+                <CardHeader>
+                  <Skeleton className="h-4 w-24" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-8 w-16 mb-2" />
+                  <Skeleton className="h-3 w-32" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat, index) => (
+            {statsCards.map((stat, index) => (
           <Card
             key={index}
-            className="relative overflow-hidden transition-all duration-300 hover:shadow-lg hover:scale-105 border-border/50"
+                className="relative overflow-hidden transition-all duration-300 hover:shadow-lg hover:scale-[1.02] border-border/50"
           >
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
+                  <CardTitle className="text-xs md:text-sm font-medium text-muted-foreground">{stat.title}</CardTitle>
               <div className={`${stat.bgColor} p-2 rounded-lg`}>
                 <stat.icon className={`h-4 w-4 ${stat.color}`} />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-foreground">{stat.value}</div>
+                  <div className="text-xl md:text-2xl font-bold text-foreground">{stat.value}</div>
+                  {stat.change && (
               <div className="flex items-center gap-1 mt-1">
-                <TrendingUp className="h-4 w-4 text-green-500" />
+                      <TrendingUp className="h-3 w-3 md:h-4 md:w-4 text-green-500" />
                 <p className="text-xs text-green-500 font-medium">{stat.change}</p>
-                <span className="text-xs text-muted-foreground">vs mois dernier</span>
               </div>
+                  )}
             </CardContent>
           </Card>
         ))}
       </div>
+        )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <Card className="col-span-4 border-border/50">
+          <Card className="col-span-full lg:col-span-4 border-border/50">
           <CardHeader>
-            <CardTitle>Aperçu des Activités</CardTitle>
-            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
+              <CardTitle className="text-lg md:text-xl">Bons Récents</CardTitle>
+              <CardDescription className="text-sm">Les derniers bons créés sur la plateforme</CardDescription>
           </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              Graphique des activités (à implémenter)
+            <CardContent>
+              {loading ? (
+                <div className="space-y-4">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="h-2 w-2 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-24" />
+                      </div>
+                      <Skeleton className="h-6 w-16" />
+                    </div>
+                  ))}
+                </div>
+              ) : bons.length === 0 ? (
+                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                  <div className="text-center space-y-2">
+                    <Ticket className="h-12 w-12 mx-auto opacity-50" />
+                    <p className="text-sm">Aucun bon pour le moment</p>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="col-span-4 border-border/50">
-          <CardHeader>
-            <CardTitle>Aperçu des Activités</CardTitle>
-            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              Graphique des activités (à implémenter)
             </div>
-          </CardContent>
-        </Card>
-        <Card className="col-span-4 border-border/50">
-          <CardHeader>
-            <CardTitle>Aperçu des Activités</CardTitle>
-            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              Graphique des activités (à implémenter)
+              ) : (
+                <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                  {bons.slice(0, 10).map((bon) => (
+                    <div
+                      key={bon.id}
+                      className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-3 rounded-lg border border-border/50 hover:bg-accent/50 transition-colors"
+                    >
+                      <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-1.5 sm:mt-0" />
+                      <div className="flex-1 space-y-1 min-w-0">
+                        <p className="text-sm font-medium leading-none truncate">
+                          {bon.bonNumber || `Bon #${bon.id}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {bon.bonType?.name || "Type inconnu"} • {bon.siteName || "Site non spécifié"}
+                        </p>
+                        {bon.createdAt && (
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(bon.createdAt).toLocaleDateString("fr-FR", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </p>
+                        )}
             </div>
-          </CardContent>
-        </Card>
-        <Card className="col-span-4 border-border/50">
-          <CardHeader>
-            <CardTitle>Aperçu des Activités</CardTitle>
-            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              Graphique des activités (à implémenter)
+                      <div className="flex-shrink-0">{getStatusBadge(bon.status)}</div>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="col-span-4 border-border/50">
-          <CardHeader>
-            <CardTitle>Aperçu des Activités</CardTitle>
-            <CardDescription>Statistiques de vos bons numériques ce mois-ci</CardDescription>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
-              Graphique des activités (à implémenter)
+                  ))}
             </div>
+              )}
           </CardContent>
         </Card>
 
-        <Card className="col-span-3 border-border/50">
+          <Card className="col-span-full lg:col-span-3 border-border/50">
           <CardHeader>
-            <CardTitle>Activité Récente</CardTitle>
-            <CardDescription>Les dernières transactions de votre plateforme</CardDescription>
+              <CardTitle className="text-lg md:text-xl">Résumé</CardTitle>
+              <CardDescription className="text-sm">Statistiques globales de votre activité</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {[1, 2, 3, 4, 5].map((item) => (
-                <div key={item} className="flex items-center gap-4">
-                  <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                  <div className="flex-1 space-y-1">
-                    <p className="text-sm font-medium leading-none">Transaction #{item}234</p>
-                    <p className="text-sm text-muted-foreground">Il y a {item} minutes</p>
-                  </div>
-                  <div className="font-medium text-sm">+{item * 100} €</div>
+              {loading ? (
+                <div className="space-y-4">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
                 </div>
-              ))}
-            </div>
+              ) : (
+            <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                    <div className="flex items-center gap-3">
+                      <Ticket className="h-5 w-5 text-blue-500" />
+                      <span className="text-sm font-medium">Total</span>
+                    </div>
+                    <span className="text-lg font-bold">{stats.total}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+                    <div className="flex items-center gap-3">
+                      <Activity className="h-5 w-5 text-yellow-500" />
+                      <span className="text-sm font-medium">En attente</span>
+                    </div>
+                    <span className="text-lg font-bold">{stats.pending}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                    <div className="flex items-center gap-3">
+                      <TrendingUp className="h-5 w-5 text-green-500" />
+                      <span className="text-sm font-medium">Approuvés</span>
+                    </div>
+                    <span className="text-lg font-bold">{stats.approved}</span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                    <div className="flex items-center gap-3">
+                      <DollarSign className="h-5 w-5 text-red-500" />
+                      <span className="text-sm font-medium">Rejetés</span>
+                    </div>
+                    <span className="text-lg font-bold">{stats.rejected}</span>
+                  </div>
+                </div>
+              )}
           </CardContent>
         </Card>
       </div>
