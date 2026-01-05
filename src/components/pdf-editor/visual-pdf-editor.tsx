@@ -4,9 +4,9 @@ import { useState, useCallback } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { PDFTemplate, PDFTemplateSection } from '@/lib/api'
-import { ElementsPalette } from './elements-palette'
+// import { ElementsPalette } from './elements-palette' // TODO: Create elements-palette component
 import { EditorContentArea } from './editor-content'
-import { PropertiesPanel } from './properties-panel'
+// import { PropertiesPanel } from './properties-panel' // TODO: Create properties-panel component
 import { TemplatePreview } from './template-preview'
 import { Card } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -126,7 +126,9 @@ export function VisualPDFEditor({
     <DndProvider backend={HTML5Backend}>
       <div className="flex h-[calc(100vh-200px)] border rounded-lg overflow-hidden bg-background">
         {/* Palette d'éléments */}
+        {/* TODO: Create ElementsPalette component
         <ElementsPalette onElementAdd={handleAddSection} />
+        */}
 
         {/* Zone principale */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -196,10 +198,10 @@ export function VisualPDFEditor({
         </div>
 
         {/* Panneau de propriétés */}
-        <PropertiesPanel
+        {/* <PropertiesPanel
           selectedSection={selectedSection}
           onUpdate={handleUpdateSection}
-        />
+        /> */}
       </div>
     </DndProvider>
   )

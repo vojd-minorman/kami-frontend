@@ -13,7 +13,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import Color from '@tiptap/extension-color'
 import Underline from '@tiptap/extension-underline'
 import Link from '@tiptap/extension-link'
-import { Toolbar } from './toolbar'
+// import { Toolbar } from './toolbar' // TODO: Create toolbar component
 import { useDrop } from 'react-dnd'
 import { useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
@@ -106,7 +106,7 @@ export function EditorContentArea({
         className
       )}
     >
-      <Toolbar editor={editor} />
+      {/* <Toolbar editor={editor} /> */}
       <div className="flex-1 overflow-auto">
         <TiptapEditorContent editor={editor} />
       </div>

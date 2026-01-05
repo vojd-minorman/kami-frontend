@@ -4,10 +4,10 @@ import { useState, useCallback, useEffect } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import { PDFTemplate, PDFTemplateSection, BonType, BonField } from '@/lib/api'
-import { ElementsPalette } from './elements-palette'
+// import { ElementsPalette } from './elements-palette' // TODO: Create elements-palette component
 import { CanvasArea } from './canvas-area'
-import { PropertiesPanel } from './properties-panel'
-import { TableEditor } from './table-editor'
+// import { PropertiesPanel } from './properties-palette' // TODO: Create properties-panel component
+// import { TableEditor } from './table-editor' // TODO: Create table-editor component
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Maximize2, Minimize2, X } from 'lucide-react'
@@ -139,9 +139,9 @@ export function VisualPDFEditorV2({
         </div>
 
         {/* Palette d'éléments en haut */}
-        <div className="border-b bg-muted/20 px-4 py-3">
-          <ElementsPalette onElementAdd={(type) => handleAddSection(type)} />
-        </div>
+        {/* <div className="border-b bg-muted/20 px-4 py-3">
+          <ElementsPalette onElementAdd={(type: string) => handleAddSection(type)} />
+        </div> */}
 
         {/* Zone principale */}
         <div className="flex-1 flex overflow-hidden">
@@ -157,12 +157,12 @@ export function VisualPDFEditorV2({
           </div>
 
           {/* Panneau de propriétés */}
-          <PropertiesPanel
+          {/* <PropertiesPanel
             selectedSection={selectedSection}
             onUpdate={handleUpdateSection}
             onDelete={selectedSectionId ? () => handleDeleteSection(selectedSectionId) : undefined}
             availableFields={availableFields}
-          />
+          /> */}
         </div>
       </div>
     </DndProvider>

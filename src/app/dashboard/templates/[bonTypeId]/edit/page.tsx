@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type PDFTemplate, type BonType, type BonField } from '@/lib/api'
+import { api, type PDFTemplate, type BonType, type BonField, type BonFieldGroup } from '@/lib/api'
 import { Skeleton } from '@/components/ui/skeleton'
 import { 
   ArrowLeft, 
@@ -59,6 +59,8 @@ import {
   Quote,
   ZoomIn,
   ZoomOut,
+  Layers,
+  Grid3x3,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -96,8 +98,10 @@ import { CSS } from '@dnd-kit/utilities'
 import type { PDFField } from '@/lib/api'
 
 // Extension personnalisée pour la taille de police
-import { Extension } from '@tiptap/core'
-import { Mark } from '@tiptap/core'
+import { Extension, Mark } from '@tiptap/core'
+
+// Plus besoin de l'extension DataBinding - on utilise maintenant des placeholders {{bon.values.fieldName}}
+// qui seront remplacés directement dans le HTML lors de la génération du PDF avec Puppeteer
 
 const FontSize = Mark.create({
   name: 'fontSize',
@@ -209,6 +213,71 @@ function DraggableField({ field }: { field: BonField }) {
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium truncate">{field.label}</p>
           <p className="text-xs text-muted-foreground truncate">({field.name})</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Composant pour un champ de groupe draggable
+function DraggableGroupField({ 
+  field, 
+  groupName, 
+  groupLabel,
+  isRepeatable 
+}: { 
+  field: BonField
+  groupName: string
+  groupLabel: string
+  isRepeatable: boolean
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `group-${groupName}-${field.id}`,
+    data: {
+      type: 'group-field',
+      field,
+      groupName,
+      groupLabel,
+      isRepeatable,
+    },
+  })
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const getTypeIcon = (type: BonField['type']) => {
+    switch (type) {
+      case 'text': return <Type className="h-3 w-3" />
+      case 'number': return <Type className="h-3 w-3" />
+      case 'date': return <Type className="h-3 w-3" />
+      case 'datetime': return <Type className="h-3 w-3" />
+      case 'select': return <Type className="h-3 w-3" />
+      case 'checkbox': return <Type className="h-3 w-3" />
+      default: return <Type className="h-3 w-3" />
+    }
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={cn(
+        "px-2 py-1.5 rounded text-xs bg-background border border-border/50 hover:bg-accent/50 transition-colors cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-50"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {getTypeIcon(field.type)}
+        <div className="flex-1 min-w-0">
+          <p className="font-medium truncate">{field.label}</p>
+          <p className="text-muted-foreground truncate text-[10px]">
+            {groupLabel} • {field.name}
+            {isRepeatable && <span className="ml-1 text-primary">[Répétable]</span>}
+          </p>
         </div>
       </div>
     </div>
@@ -358,6 +427,9 @@ export default function EditTemplatePage() {
     ],
     content: '',
     immediatelyRender: false,
+    parseOptions: {
+      preserveWhitespace: 'full',
+    },
     editorProps: {
       attributes: {
         class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none min-h-[500px] p-8',
@@ -688,187 +760,8 @@ export default function EditTemplatePage() {
     })
   }
 
-  // Fonction pour extraire les positions des champs depuis l'éditeur réel
-  const extractFieldPositionsFromEditor = (): PDFField[] => {
-    if (!editor) {
-      return []
-    }
-
-    const fields: PDFField[] = []
-    const editorElement = editor.view.dom
-    
-    // Trouver tous les spans avec data-binding dans l'éditeur
-    const spans = editorElement.querySelectorAll('span[data-binding]')
-    
-    const pageSize = template?.pageSize || template?.layout?.pageSize || 'A4'
-    const orientation = template?.orientation || template?.layout?.orientation || 'portrait'
-    const margins = template?.margins || template?.layout?.margins || { top: 2.5, right: 2.5, bottom: 2.5, left: 2.5 }
-    
-    // Dimensions en mm
-    const pageWidth = pageSize === 'A4' ? 210 : pageSize === 'A3' ? 297 : 216
-    const pageHeight = pageSize === 'A4' ? 297 : pageSize === 'A3' ? 420 : 279
-    
-    spans.forEach((span, index) => {
-      const element = span as HTMLElement
-      const rect = element.getBoundingClientRect()
-      const editorRect = editorElement.getBoundingClientRect()
-      
-      // Calculer la position relative à l'éditeur (en pixels)
-      const xPx = rect.left - editorRect.left
-      const yPx = rect.top - editorRect.top
-      
-      // Convertir pixels en mm puis en points
-      // 1px ≈ 0.264583mm à 96dpi, 1mm = 2.83465 points
-      const xMm = xPx * 0.264583
-      const yMm = yPx * 0.264583
-      const xPoints = xMm * 2.83465
-      const yPoints = yMm * 2.83465
-      
-      // pdf-lib utilise Y depuis le bas
-      const pageHeightMm = orientation === 'landscape' ? pageWidth : pageHeight
-      const yFromBottomMm = pageHeightMm - yMm - margins.top - margins.bottom
-      const yFromBottomPoints = yFromBottomMm * 2.83465
-      
-      const binding = element.getAttribute('data-binding') || ''
-      const fieldName = binding.replace('bon.values.', '')
-      
-      // Obtenir les styles
-      const computedStyle = window.getComputedStyle(element)
-      const fontSize = parseFloat(computedStyle.fontSize) || 12
-      const color = computedStyle.color || '#000000'
-      const fontWeight = computedStyle.fontWeight
-      const fontStyle = computedStyle.fontStyle
-      
-      // Vérifier si c'est dans un tableau
-      const tableInfo = extractTableInfo(element, editorElement)
-      
-      fields.push({
-        id: `field_${index}`,
-        fieldName,
-        position: {
-          x: (margins.left * 2.83465) + xPoints, // Ajouter la marge gauche
-          y: yFromBottomPoints,
-          width: (rect.width * 0.264583) * 2.83465,
-          height: (rect.height * 0.264583) * 2.83465,
-          page: 1
-        },
-        style: {
-          fontSize: fontSize,
-          color: color,
-          bold: parseInt(fontWeight) >= 600,
-          italic: fontStyle === 'italic'
-        },
-        isArray: false,
-        tableInfo: tableInfo
-      })
-    })
-    
-    return fields
-  }
-
-  // Fonction pour extraire les positions exactes des champs depuis le DOM
-  const extractFieldPositions = (
-    container: HTMLElement,
-    margins: { top: number; right: number; bottom: number; left: number },
-    pageWidth: number
-  ): PDFField[] => {
-    const fields: PDFField[] = []
-    const spans = container.querySelectorAll('span[data-binding]')
-    
-    spans.forEach((span, index) => {
-      const element = span as HTMLElement
-      const rect = element.getBoundingClientRect()
-      const containerRect = container.getBoundingClientRect()
-      
-      // Calculer la position relative au container (en pixels)
-      const xPx = rect.left - containerRect.left
-      const yPx = rect.top - containerRect.top
-      
-      // Convertir pixels en mm (1px ≈ 0.264583mm à 96dpi)
-      const xMm = xPx * 0.264583
-      const yMm = yPx * 0.264583
-      
-      // Convertir mm en points pour pdf-lib (1mm = 2.83465 points)
-      const xPoints = xMm * 2.83465
-      const yPoints = yMm * 2.83465
-      
-      // pdf-lib utilise Y depuis le bas, donc on doit inverser
-      const pageHeightMm = 297 // A4 height en mm (sera ajusté selon le format)
-      const yFromBottomMm = pageHeightMm - yMm
-      const yFromBottomPoints = yFromBottomMm * 2.83465
-      
-      const binding = element.getAttribute('data-binding') || ''
-      const fieldName = binding.replace('bon.values.', '')
-      
-      // Obtenir les styles
-      const computedStyle = window.getComputedStyle(element)
-      const fontSize = parseFloat(computedStyle.fontSize) || 12
-      const color = computedStyle.color || '#000000'
-      const fontWeight = computedStyle.fontWeight
-      const fontStyle = computedStyle.fontStyle
-      
-      // Vérifier si c'est dans un tableau
-      const tableInfo = extractTableInfo(element, container)
-      
-      fields.push({
-        id: `field_${index}`,
-        fieldName,
-        position: {
-          x: xPoints,
-          y: yFromBottomPoints, // Y depuis le bas pour pdf-lib
-          width: (rect.width * 0.264583) * 2.83465, // Largeur en points
-          height: (rect.height * 0.264583) * 2.83465, // Hauteur en points
-          page: 1
-        },
-        style: {
-          fontSize: fontSize,
-          color: color,
-          bold: parseInt(fontWeight) >= 600,
-          italic: fontStyle === 'italic'
-        },
-        isArray: false,
-        tableInfo: tableInfo
-      })
-    })
-    
-    return fields
-  }
-
-  // Fonction pour extraire les informations de tableau
-  const extractTableInfo = (element: HTMLElement, container: HTMLElement): PDFField['tableInfo'] | undefined => {
-    let current: HTMLElement | null = element.parentElement
-    
-    // Chercher le tableau parent
-    while (current && current.tagName !== 'TABLE') {
-      current = current.parentElement
-    }
-    
-    if (!current) return undefined
-    
-    // Trouver la ligne (tr) parente
-    let row: HTMLElement | null = element.parentElement
-    while (row && row.tagName !== 'TR') {
-      row = row.parentElement
-    }
-    
-    if (!row) return undefined
-    
-    // Compter les lignes avant celle-ci
-    const table = current as HTMLTableElement
-    const rows = Array.from(table.querySelectorAll('tr'))
-    const rowIndex = rows.indexOf(row as HTMLTableRowElement)
-    
-    // Compter les cellules avant celle-ci dans la ligne
-    const cells = Array.from(row.querySelectorAll('td, th'))
-    const cellElement = element.closest('td, th') as HTMLElement
-    const columnIndex = cellElement ? cells.indexOf(cellElement) : 0
-    
-    return {
-      rowIndex: rowIndex,
-      columnIndex: columnIndex,
-      tableId: `table_${table.getBoundingClientRect().top}`
-    }
-  }
+  // Plus besoin d'extraire les positions - les placeholders {{bon.values.fieldName}} 
+  // seront remplacés directement dans le HTML lors de la génération du PDF avec Puppeteer
 
   const handleSave = async () => {
     if (!template || !editor) {
@@ -881,19 +774,24 @@ export default function EditTemplatePage() {
       setError(null)
       
       // Récupérer le contenu HTML de l'éditeur
+      // Les placeholders {{bon.values.fieldName}} seront remplacés lors de la génération du PDF
       const html = editor.getHTML()
       
-      // Extraire les positions des champs depuis l'éditeur réel
-      // Le PDF sera généré côté backend avec pdfmake (plus fiable)
-      const fields = extractFieldPositionsFromEditor()
+      console.log('Saving template HTML with placeholders')
+      console.log('HTML content length:', html.length)
+      
+      // Compter les placeholders dans le HTML
+      const placeholderMatches = html.match(/\{\{bon\.values\.\w+\}\}/g)
+      const placeholderCount = placeholderMatches?.length || 0
+      console.log('Found placeholders:', placeholderCount)
       
       const updatedTemplate: PDFTemplate = {
         ...template,
         // Sauvegarder le HTML directement dans content
+        // Les placeholders {{bon.values.fieldName}} seront remplacés par Puppeteer lors de la génération
         content: html,
-        // Le PDF sera généré côté backend, pas besoin de templateFileBase64
-        // Positions exactes des champs calculées depuis le DOM de l'éditeur
-        fields: fields,
+        // Plus besoin de fields ni de positions - tout est dans le HTML avec les placeholders
+        fields: [],
         // Conserver sections pour compatibilité avec l'ancien format
         sections: convertHTMLToSections(html),
         // S'assurer que pageSize, orientation et margins sont inclus
@@ -901,6 +799,8 @@ export default function EditTemplatePage() {
         orientation: (template.orientation || template.layout?.orientation || 'portrait') as 'portrait' | 'landscape',
         margins: template.margins || template.layout?.margins || { top: 2.5, right: 2.5, bottom: 2.5, left: 2.5 },
       }
+      
+      console.log('Saving template with', placeholderCount, 'placeholders')
       
       await api.saveTemplate(bonTypeId, updatedTemplate)
       setTemplate(updatedTemplate)
@@ -986,33 +886,144 @@ export default function EditTemplatePage() {
     reader.readAsDataURL(file)
   }
 
+  // Fonction pour insérer un tableau de groupe répétable
+  const handleInsertRepeatableGroup = (group: BonFieldGroup) => {
+    if (!editor || !group.fields || group.fields.length === 0) {
+      console.warn('Editor or group fields not available')
+      return
+    }
+
+    // Créer un tableau avec une ligne d'en-tête et une ligne de données
+    // Pour les groupes répétables, bon.values.groupName est un array d'objets
+    // Format dans bon.values: { "groupName": [{field1: val1, field2: val2}, ...] }
+    // On utilise des placeholders avec le format: {{bon.values.groupName.fieldName}}
+    // Le backend devra être modifié pour gérer cette structure imbriquée
+    
+    // Ligne d'en-tête avec les labels
+    const headerRow = group.fields.map(field => 
+      `<th>${field.label}</th>`
+    ).join('')
+    
+    // Ligne de données avec les placeholders
+    // Format: {{bon.values.groupName.fieldName}}
+    // Note: Le backend actuel ne gère pas encore les groupes imbriqués,
+    // mais on prépare la structure pour une future implémentation
+    const dataRow = group.fields.map(field => 
+      `<td><span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">{{bon.values.${group.name}.${field.name}}}</span></td>`
+    ).join('')
+    
+    const tableHTML = `<table>
+      <tr>${headerRow}</tr>
+      <tr>${dataRow}</tr>
+    </table>`
+    
+    editor.chain()
+      .focus()
+      .insertContent(tableHTML, {
+        parseOptions: {
+          preserveWhitespace: 'full',
+        },
+      })
+      .run()
+  }
+
+  // Fonction pour insérer les champs d'un groupe simple (non répétable)
+  const handleInsertSimpleGroup = (group: BonFieldGroup) => {
+    if (!editor || !group.fields || group.fields.length === 0) {
+      console.warn('Editor or group fields not available')
+      return
+    }
+
+    // Insérer les champs avec leur label et le placeholder
+    // Format: {{bon.values.groupName.fieldName}}
+    const fieldsHTML = group.fields.map(field => {
+      const placeholder = `{{bon.values.${group.name}.${field.name}}}`
+      return `<p><strong>${field.label}:</strong> <span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">${placeholder}</span></p>`
+    }).join('')
+    
+    editor.chain()
+      .focus()
+      .insertContent(fieldsHTML, {
+        parseOptions: {
+          preserveWhitespace: 'full',
+        },
+      })
+      .run()
+  }
+
   // Fonction pour lier du texte sélectionné à un champ
-  // IMPORTANT: Le data-binding "bon.values.{fieldName}" indique où la valeur du champ sera placée
-  // lors de la génération du PDF. Quand un utilisateur crée un bon, les valeurs qu'il saisit
-  // dans le formulaire seront automatiquement remplacées à ces emplacements dans le template.
-  const handleLinkToField = (fieldName: string, fieldLabel?: string) => {
-    if (!editor) return
+  // IMPORTANT: On utilise maintenant des placeholders {{bon.values.fieldName}} qui seront remplacés
+  // lors de la génération du PDF avec Puppeteer. Plus besoin de calculer les positions !
+  // Pour les champs de groupes: {{bon.values.groupName.fieldName}}
+  const handleLinkToField = (fieldName: string, fieldLabel?: string, groupName?: string) => {
+    if (!editor) {
+      console.warn('Editor not available for linking field')
+      return
+    }
     
     const { from, to } = editor.state.selection
     const selectedText = editor.state.doc.textBetween(from, to)
     const displayText = selectedText || fieldLabel || fieldName
     
-    // Insérer le champ avec data-binding à la position actuelle du curseur
-    // Le data-binding indique où la valeur sera remplacée lors de la génération du PDF
-    editor.chain()
-      .focus()
-      .insertContent(`<span data-binding="bon.values.${fieldName}" style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">${displayText}</span>`)
-      .run()
+    console.log(`Linking field "${fieldName}" with display text "${displayText}" at position ${from}-${to}`)
     
+    // Utiliser un placeholder qui sera remplacé lors de la génération du PDF
+    // Le placeholder sera remplacé par la valeur réelle lors de la génération avec Puppeteer
+    // Pour les champs de groupes: {{bon.values.groupName.fieldName}}
+    const placeholder = groupName ? `{{bon.values.${groupName}.${fieldName}}}` : `{{bon.values.${fieldName}}}`
+    // Afficher le placeholder dans l'éditeur pour que l'utilisateur voie où la valeur sera placée
+    const spanHTML = `<span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">${placeholder}</span>`
+    console.log('Inserting HTML with placeholder:', spanHTML)
+    
+    // Utiliser insertContent avec parseOptions pour préserver les attributs data-*
+        const insertOptions = {
+          parseOptions: {
+            preserveWhitespace: 'full' as const,
+          },
+        }
+    
+    // Si du texte est sélectionné, le remplacer par le champ lié
+    // Sinon, insérer le champ à la position du curseur
+    if (from !== to && selectedText.trim()) {
+      // Remplacer le texte sélectionné par le champ lié
+      editor.chain()
+        .focus()
+        .deleteRange({ from, to })
+        .insertContent(spanHTML, insertOptions)
+        .run()
+    } else {
+      // Insérer le champ avec data-binding à la position actuelle du curseur
+      editor.chain()
+        .focus()
+        .insertContent(spanHTML, insertOptions)
+        .run()
+    }
+    
+    // Vérifier immédiatement après l'insertion
+    setTimeout(() => {
+      const htmlAfter = editor.getHTML()
+      console.log('HTML after insertion:', htmlAfter)
+      console.log('Contains data-binding:', htmlAfter.includes('data-binding'))
+      console.log('Contains field name:', htmlAfter.includes(fieldName))
+      
+      // Vérifier dans le DOM
+      const editorElement = editor.view.dom
+      const spansAfter = editorElement.querySelectorAll('span[data-binding]')
+      console.log('Spans with data-binding in DOM after insertion:', spansAfter.length)
+      
+      if (spansAfter.length === 0 && htmlAfter.includes('data-binding')) {
+        console.error('WARNING: data-binding found in HTML but not in DOM - Tiptap may be filtering it!')
+      }
+    }, 100)
     setShowDataBinding(false)
   }
 
   // Gestion du drag & drop
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event
-    const field = bonType?.fields?.find(f => f.id === active.id)
-    if (field) {
-      setActiveField(field)
+    const data = active.data.current
+    if (data?.type === 'field' || data?.type === 'group-field') {
+      setActiveField(data.field)
     }
   }
 
@@ -1027,20 +1038,23 @@ export default function EditTemplatePage() {
     const isOverEditor = over.id === 'editor-content' || String(over.id) === 'editor-drop-zone'
     
     if (isOverEditor) {
-      const field = bonType?.fields?.find(f => f.id === active.id)
-      if (field) {
-        // Utiliser un timeout pour s'assurer que le DOM est mis à jour
+      const data = active.data.current
+      if (data?.type === 'field') {
+        // Champ simple
+        const field = data.field
         setTimeout(() => {
           if (!editor) return
-          
-          // S'assurer que l'éditeur a le focus
           editor.commands.focus()
-          
-          // Insérer le champ à la position actuelle du curseur
-          // Le data-binding "bon.values.{fieldName}" indique où la valeur sera placée lors de la génération du PDF
-          // Quand un utilisateur crée un bon et remplit le formulaire, les valeurs seront automatiquement
-          // remplacées à ces emplacements dans le template PDF généré
           handleLinkToField(field.name, field.label)
+        }, 10)
+      } else if (data?.type === 'group-field') {
+        // Champ de groupe
+        const field = data.field
+        const groupName = data.groupName
+        setTimeout(() => {
+          if (!editor) return
+          editor.commands.focus()
+          handleLinkToField(field.name, field.label, groupName)
         }, 10)
       }
     }
@@ -1646,7 +1660,7 @@ export default function EditTemplatePage() {
           {/* Éditeur principal avec palette */}
           <div className="flex-1 overflow-hidden flex">
             {/* Palette de champs */}
-            {showFieldsPalette && bonType?.fields && bonType.fields.length > 0 && (
+            {showFieldsPalette && (bonType?.fields && bonType.fields.length > 0 || bonType?.fieldGroups && bonType.fieldGroups.length > 0) && (
               <div className="w-64 border-r bg-background overflow-y-auto">
                 <div className="p-4 border-b sticky top-0 bg-background z-10">
                   <div className="flex items-center justify-between mb-2">
@@ -1665,14 +1679,99 @@ export default function EditTemplatePage() {
                       <Minimize2 className="h-4 w-4" />
                     </Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Glissez-déposez un champ dans l'éditeur
-                  </p>
                 </div>
-                <div className="p-2 space-y-1">
-                  {bonType.fields.map((field) => (
-                    <DraggableField key={field.id} field={field} />
-                  ))}
+                
+                <div className="p-2 space-y-3">
+                  {/* Champs simples (sans groupe) */}
+                  {bonType.fields && bonType.fields.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Champs simples</h4>
+                      <div className="space-y-1">
+                        {bonType.fields.filter(f => !f.bonFieldGroupId).map((field) => (
+                          <DraggableField key={field.id} field={field} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Groupes de champs */}
+                  {bonType.fieldGroups && bonType.fieldGroups.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Groupes de champs</h4>
+                      <div className="space-y-2">
+                        {bonType.fieldGroups
+                          .sort((a, b) => a.order - b.order)
+                          .map((group) => (
+                            <div
+                              key={group.id}
+                              className="rounded-md border bg-card overflow-hidden"
+                            >
+                              {/* En-tête du groupe */}
+                              <div className="p-2 bg-muted/50 border-b">
+                                <div className="flex items-center gap-2">
+                                  {group.isRepeatable ? (
+                                    <Grid3x3 className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                                  ) : (
+                                    <Layers className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-semibold truncate">{group.label}</p>
+                                    {group.description && (
+                                      <p className="text-xs text-muted-foreground truncate mt-0.5">{group.description}</p>
+                                    )}
+                                  </div>
+                                  <Badge variant={group.isRepeatable ? "default" : "secondary"} className="text-xs h-5">
+                                    {group.isRepeatable ? "Répétable" : "Simple"}
+                                  </Badge>
+                                </div>
+                              </div>
+                              
+                              {/* Champs du groupe - maintenant draggable individuellement */}
+                              {group.fields && group.fields.length > 0 && (
+                                <div className="p-2 space-y-1">
+                                  {group.fields
+                                    .sort((a, b) => a.order - b.order)
+                                    .map((field) => (
+                                      <DraggableGroupField
+                                        key={field.id}
+                                        field={field}
+                                        groupName={group.name}
+                                        groupLabel={group.label}
+                                        isRepeatable={group.isRepeatable}
+                                      />
+                                    ))}
+                                </div>
+                              )}
+                              
+                              {/* Action */}
+                              <div className="p-2 border-t bg-muted/30">
+                                {group.isRepeatable ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs w-full"
+                                    onClick={() => handleInsertRepeatableGroup(group)}
+                                  >
+                                    <TableIcon className="h-3 w-3 mr-1.5" />
+                                    Insérer comme tableau
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs w-full"
+                                    onClick={() => handleInsertSimpleGroup(group)}
+                                  >
+                                    <Layers className="h-3 w-3 mr-1.5" />
+                                    Insérer le groupe
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

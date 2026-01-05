@@ -286,14 +286,7 @@ export default function VouchersPage() {
                           {bon.bonNumber || `#${bon.id}`}
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col">
-                            <span className="font-medium">{bon.bonType?.name || 'N/A'}</span>
-                            {bon.bonType?.code && (
-                              <span className="text-xs text-muted-foreground font-mono">
-                                {bon.bonType.code}
-                              </span>
-                            )}
-                          </div>
+                          <span className="font-medium">{bon.bonType?.name || 'N/A'}</span>
                         </TableCell>
                         <TableCell className="text-sm">
                           {bon.siteName || bon.siteId || 'N/A'}

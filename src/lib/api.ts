@@ -69,7 +69,8 @@ export interface BonType {
   qrConfig?: string | any | null
   status: 'active' | 'inactive'
   createdBy: string
-  fields?: BonField[] // Relation préchargée
+  fields?: BonField[] // Relation préchargée (champs simples, hors groupes)
+  fieldGroups?: BonFieldGroup[] // Relation préchargée (groupes de champs)
   workflows?: any[]
   createdAt?: string
   updatedAt?: string
@@ -78,6 +79,7 @@ export interface BonType {
 export interface BonField {
   id: string
   bonTypeId: string
+  bonFieldGroupId?: string | null // null = champ simple (hors groupe), défini = appartient à un groupe
   name: string
   label: string
   type: 'text' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox'
@@ -85,6 +87,23 @@ export interface BonField {
   validationRules?: string | any | null
   options?: string | any | null // JSON string pour select
   order: number
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface BonFieldGroup {
+  id: string
+  bonTypeId: string
+  name: string // Nom technique du groupe (ex: "invoice_line")
+  label: string // Label affiché (ex: "Ligne de facture")
+  description?: string | null
+  isRepeatable: boolean // true = peut être répété (tableau), false = une seule instance
+  order: number
+  minRepeats?: number | null // Nombre minimum de répétitions (si repeatable)
+  maxRepeats?: number | null // Nombre maximum de répétitions (si repeatable)
+  fields?: BonField[] // Champs du groupe (relation préchargée)
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface PDFTemplateSection {
@@ -481,8 +500,17 @@ class ApiClient {
    */
   async getBonTypes(): Promise<BonType[]> {
     const bonTypes = await this.request<BonType[]>('/bon-types')
+    console.log('Raw bon types from API:', bonTypes)
+    
     // Parser formStructure si c'est une string JSON
     return bonTypes.map(bt => {
+      console.log(`Processing bon type ${bt.id}:`, {
+        hasFields: !!bt.fields,
+        fieldsCount: bt.fields?.length || 0,
+        hasFormStructure: !!bt.formStructure,
+        formStructureType: typeof bt.formStructure
+      })
+      
       if (bt.formStructure && typeof bt.formStructure === 'string') {
         try {
           bt.formStructure = JSON.parse(bt.formStructure)
@@ -491,20 +519,58 @@ class ApiClient {
           bt.formStructure = { fields: [] }
         }
       }
-      // Si pas de formStructure mais des fields (relation), créer formStructure
-      if (!bt.formStructure?.fields && bt.fields && bt.fields.length > 0) {
+      // Si pas de formStructure OU formStructure.fields est vide, mais qu'on a des fields (relation), créer formStructure
+      const hasFormStructureFields = bt.formStructure?.fields && bt.formStructure.fields.length > 0
+      const hasFields = bt.fields && bt.fields.length > 0
+      
+      if (!hasFormStructureFields && hasFields) {
+        console.log('Creating formStructure from fields for bon type:', bt.id, 'fields:', bt.fields)
         bt.formStructure = {
-          fields: bt.fields.map((field: any) => ({
-            name: field.name,
-            label: field.label,
-            type: field.type,
-            required: field.required,
-            placeholder: field.label,
-            options: field.options ? (typeof field.options === 'string' ? JSON.parse(field.options) : field.options) : undefined,
-            validationRules: field.validationRules ? (typeof field.validationRules === 'string' ? JSON.parse(field.validationRules) : field.validationRules) : undefined,
-            order: field.order,
-          }))
+          ...(bt.formStructure || {}),
+          fields: (bt.fields || []).map((field: any) => {
+            // Parser les options pour les champs select
+            let parsedOptions = undefined
+            if (field.options) {
+              if (typeof field.options === 'string') {
+                try {
+                  parsedOptions = JSON.parse(field.options)
+                } catch (e) {
+                  console.error('Error parsing field options:', e)
+                  // Si le parsing échoue, essayer de traiter comme un tableau de strings
+                  parsedOptions = field.options.split(',').map((opt: string) => opt.trim())
+                }
+              } else {
+                parsedOptions = field.options
+              }
+            }
+
+            // Parser les validationRules
+            let parsedValidationRules = undefined
+            if (field.validationRules) {
+              if (typeof field.validationRules === 'string') {
+                try {
+                  parsedValidationRules = JSON.parse(field.validationRules)
+                } catch (e) {
+                  console.error('Error parsing field validationRules:', e)
+                }
+              } else {
+                parsedValidationRules = field.validationRules
+              }
+            }
+
+            return {
+              name: field.name,
+              label: field.label,
+              type: field.type,
+              required: field.required,
+              placeholder: field.label,
+              options: parsedOptions,
+              validationRules: parsedValidationRules,
+              order: field.order,
+            }
+          })
         }
+        console.log('Created formStructure:', bt.formStructure)
       }
       return bt
     })
@@ -820,6 +886,78 @@ class ApiClient {
    */
   async deleteBonField(bonTypeId: string | number, fieldId: string | number): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/bon-types/${bonTypeId}/fields/${fieldId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  // ==================== GROUPES DE CHAMPS ====================
+
+  /**
+   * Récupérer tous les groupes de champs d'un type de bon
+   */
+  async getBonFieldGroups(bonTypeId: string | number): Promise<BonFieldGroup[]> {
+    const groups = await this.request<BonFieldGroup[]>(`/bon-types/${bonTypeId}/field-groups`)
+    // Parser les fields de chaque groupe
+    return groups.map(group => {
+      if (group.fields) {
+        group.fields = group.fields.map(field => {
+          if (field.options && typeof field.options === 'string') {
+            try {
+              field.options = JSON.parse(field.options)
+            } catch (e) {
+              console.error('Error parsing field options:', e)
+            }
+          }
+          if (field.validationRules && typeof field.validationRules === 'string') {
+            try {
+              field.validationRules = JSON.parse(field.validationRules)
+            } catch (e) {
+              console.error('Error parsing field validationRules:', e)
+            }
+          }
+          return field
+        })
+      }
+      return group
+    })
+  }
+
+  /**
+   * Récupérer un groupe de champs par son ID
+   */
+  async getBonFieldGroup(bonTypeId: string | number, groupId: string | number): Promise<BonFieldGroup> {
+    return this.request<BonFieldGroup>(`/bon-types/${bonTypeId}/field-groups/${groupId}`)
+  }
+
+  /**
+   * Créer un nouveau groupe de champs
+   */
+  async createBonFieldGroup(bonTypeId: string | number, data: Partial<BonFieldGroup>): Promise<BonFieldGroup> {
+    return this.request<BonFieldGroup>(`/bon-types/${bonTypeId}/field-groups`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Mettre à jour un groupe de champs
+   */
+  async updateBonFieldGroup(
+    bonTypeId: string | number,
+    groupId: string | number,
+    data: Partial<BonFieldGroup>
+  ): Promise<BonFieldGroup> {
+    return this.request<BonFieldGroup>(`/bon-types/${bonTypeId}/field-groups/${groupId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Supprimer un groupe de champs
+   */
+  async deleteBonFieldGroup(bonTypeId: string | number, groupId: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/bon-types/${bonTypeId}/field-groups/${groupId}`, {
       method: 'DELETE',
     })
   }

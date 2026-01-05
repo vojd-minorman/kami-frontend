@@ -35,7 +35,7 @@ import { Separator } from '@/components/ui/separator'
 import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Edit, Trash2, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type BonType, type BonField } from '@/lib/api'
+import { api, type BonType, type BonField, type BonFieldGroup } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 
 export default function EditBonTypePage() {
@@ -49,6 +49,8 @@ export default function EditBonTypePage() {
   const [bonType, setBonType] = useState<BonType | null>(null)
   const [fields, setFields] = useState<BonField[]>([])
   const [loadingFields, setLoadingFields] = useState(false)
+  const [fieldGroups, setFieldGroups] = useState<BonFieldGroup[]>([])
+  const [loadingFieldGroups, setLoadingFieldGroups] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -67,15 +69,33 @@ export default function EditBonTypePage() {
     required: false,
     options: '',
     validationRules: '',
+    bonFieldGroupId: null as string | null,
   })
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [savingField, setSavingField] = useState(false)
   const [deletingFieldId, setDeletingFieldId] = useState<string | null>(null)
 
+  // Dialog pour créer/modifier un groupe
+  const [showGroupDialog, setShowGroupDialog] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<BonFieldGroup | null>(null)
+  const [groupFormData, setGroupFormData] = useState({
+    name: '',
+    label: '',
+    description: '',
+    isRepeatable: false,
+    minRepeats: null as number | null,
+    maxRepeats: null as number | null,
+    order: 0,
+  })
+  const [groupErrors, setGroupErrors] = useState<Record<string, string>>({})
+  const [savingGroup, setSavingGroup] = useState(false)
+  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
+
   useEffect(() => {
     if (user && bonTypeId) {
       loadBonType()
       loadFields()
+      loadFieldGroups()
     }
   }, [user, bonTypeId])
 
@@ -108,6 +128,18 @@ export default function EditBonTypePage() {
       console.error('Error loading fields:', error)
     } finally {
       setLoadingFields(false)
+    }
+  }
+
+  const loadFieldGroups = async () => {
+    try {
+      setLoadingFieldGroups(true)
+      const groupsData = await api.getBonFieldGroups(bonTypeId)
+      setFieldGroups(groupsData)
+    } catch (error: any) {
+      console.error('Error loading field groups:', error)
+    } finally {
+      setLoadingFieldGroups(false)
     }
   }
 
@@ -183,6 +215,7 @@ export default function EditBonTypePage() {
         validationRules: field.validationRules && typeof field.validationRules === 'object'
           ? JSON.stringify(field.validationRules, null, 2)
           : (field.validationRules as string) || '',
+        bonFieldGroupId: field.bonFieldGroupId || null,
       })
     } else {
       setEditingField(null)
@@ -193,6 +226,7 @@ export default function EditBonTypePage() {
         required: false,
         options: '',
         validationRules: '',
+        bonFieldGroupId: null,
       })
     }
     setFieldErrors({})
@@ -256,7 +290,11 @@ export default function EditBonTypePage() {
         type: fieldFormData.type,
         required: fieldFormData.required,
         order: editingField?.order || fields.length,
+        bonFieldGroupId: fieldFormData.bonFieldGroupId && fieldFormData.bonFieldGroupId !== 'none' ? fieldFormData.bonFieldGroupId : null,
       }
+      
+      console.log('[handleSaveField] Field data to send:', JSON.stringify(fieldData, null, 2))
+      console.log('[handleSaveField] bonFieldGroupId from form:', fieldFormData.bonFieldGroupId)
 
       // Parser les options et validationRules si fournis
       if (fieldFormData.options.trim()) {
@@ -274,6 +312,7 @@ export default function EditBonTypePage() {
 
       setShowFieldDialog(false)
       await loadFields()
+      await loadFieldGroups() // Recharger les groupes pour afficher les champs mis à jour
     } catch (error: any) {
       console.error('Error saving field:', error)
       alert(error.message || 'Erreur lors de la sauvegarde du champ')
@@ -291,11 +330,134 @@ export default function EditBonTypePage() {
       setDeletingFieldId(fieldId)
       await api.deleteBonField(bonTypeId, fieldId)
       await loadFields()
+      await loadFieldGroups() // Recharger les groupes car ils peuvent contenir ce champ
     } catch (error: any) {
       console.error('Error deleting field:', error)
       alert(error.message || 'Erreur lors de la suppression du champ')
     } finally {
       setDeletingFieldId(null)
+    }
+  }
+
+  // Gestion des groupes
+  const openGroupDialog = (group?: BonFieldGroup) => {
+    if (group) {
+      setEditingGroup(group)
+      setGroupFormData({
+        name: group.name,
+        label: group.label,
+        description: group.description || '',
+        isRepeatable: group.isRepeatable,
+        minRepeats: group.minRepeats || null,
+        maxRepeats: group.maxRepeats || null,
+        order: group.order,
+      })
+    } else {
+      setEditingGroup(null)
+      setGroupFormData({
+        name: '',
+        label: '',
+        description: '',
+        isRepeatable: false,
+        minRepeats: null,
+        maxRepeats: null,
+        order: fieldGroups.length,
+      })
+    }
+    setGroupErrors({})
+    setShowGroupDialog(true)
+  }
+
+  const validateGroupForm = (): boolean => {
+    const newErrors: Record<string, string> = {}
+    
+    if (!groupFormData.name.trim()) {
+      newErrors.name = 'Le nom est requis'
+    } else if (!/^[a-z][a-z0-9_]*$/.test(groupFormData.name)) {
+      newErrors.name = 'Le nom doit commencer par une lettre et ne contenir que des lettres minuscules, chiffres et underscores'
+    }
+    
+    if (!groupFormData.label.trim()) {
+      newErrors.label = 'Le label est requis'
+    }
+
+    // Vérifier l'unicité du nom
+    const existingGroup = fieldGroups.find(g => 
+      g.name === groupFormData.name && (!editingGroup || g.id !== editingGroup.id)
+    )
+    if (existingGroup) {
+      newErrors.name = 'Un groupe avec ce nom existe déjà'
+    }
+
+    // Valider minRepeats et maxRepeats si isRepeatable est true
+    if (groupFormData.isRepeatable) {
+      if (groupFormData.minRepeats !== null && groupFormData.minRepeats < 0) {
+        newErrors.minRepeats = 'minRepeats doit être >= 0'
+      }
+      if (groupFormData.maxRepeats !== null && groupFormData.maxRepeats < 1) {
+        newErrors.maxRepeats = 'maxRepeats doit être >= 1'
+      }
+      if (groupFormData.minRepeats !== null && groupFormData.maxRepeats !== null && groupFormData.minRepeats > groupFormData.maxRepeats) {
+        newErrors.maxRepeats = 'maxRepeats doit être >= minRepeats'
+      }
+    }
+
+    setGroupErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleSaveGroup = async () => {
+    if (!validateGroupForm()) {
+      return
+    }
+
+    try {
+      setSavingGroup(true)
+
+      const groupData: any = {
+        name: groupFormData.name.trim(),
+        label: groupFormData.label.trim(),
+        description: groupFormData.description.trim() || null,
+        isRepeatable: groupFormData.isRepeatable,
+        order: groupFormData.order,
+      }
+
+      if (groupFormData.isRepeatable) {
+        groupData.minRepeats = groupFormData.minRepeats
+        groupData.maxRepeats = groupFormData.maxRepeats
+      }
+
+      if (editingGroup) {
+        await api.updateBonFieldGroup(bonTypeId, editingGroup.id, groupData)
+      } else {
+        await api.createBonFieldGroup(bonTypeId, groupData)
+      }
+
+      setShowGroupDialog(false)
+      await loadFieldGroups()
+    } catch (error: any) {
+      console.error('Error saving group:', error)
+      alert(error.message || 'Erreur lors de la sauvegarde du groupe')
+    } finally {
+      setSavingGroup(false)
+    }
+  }
+
+  const handleDeleteGroup = async (groupId: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce groupe ? Cette action est irréversible et supprimera également tous les champs associés.')) {
+      return
+    }
+
+    try {
+      setDeletingGroupId(groupId)
+      await api.deleteBonFieldGroup(bonTypeId, groupId)
+      await loadFieldGroups()
+      await loadFields() // Recharger les champs car certains peuvent avoir été supprimés
+    } catch (error: any) {
+      console.error('Error deleting group:', error)
+      alert(error.message || 'Erreur lors de la suppression du groupe')
+    } finally {
+      setDeletingGroupId(null)
     }
   }
 
@@ -429,6 +591,114 @@ export default function EditBonTypePage() {
             </CardContent>
           </Card>
 
+          {/* Section Groupes de champs */}
+          <Card className="border-border/50 mt-6">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg md:text-xl">Groupes de champs</CardTitle>
+                  <CardDescription className="text-sm">
+                    Créez des groupes de champs répétables (tableaux) ou des groupes simples
+                  </CardDescription>
+                </div>
+                <Button type="button" onClick={() => openGroupDialog()}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Ajouter un groupe
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingFieldGroups ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : fieldGroups.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">
+                    Aucun groupe défini. Créez un groupe pour regrouper des champs (ex: lignes de facture).
+                  </p>
+                  <Button type="button" variant="outline" onClick={() => openGroupDialog()}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Ajouter le premier groupe
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {fieldGroups.map((group) => (
+                    <Card key={group.id} className="border-border/50">
+                      <CardHeader>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <CardTitle className="text-base">{group.label}</CardTitle>
+                              <Badge variant="outline" className={group.isRepeatable ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' : 'bg-gray-500/10 text-gray-500 border-gray-500/20'}>
+                                {group.isRepeatable ? 'Répétable' : 'Simple'}
+                              </Badge>
+                            </div>
+                            <CardDescription className="text-sm">
+                              {group.description || `Groupe: ${group.name}`}
+                              {group.isRepeatable && (
+                                <span className="ml-2">
+                                  ({group.minRepeats !== null ? `min: ${group.minRepeats}` : ''} 
+                                  {group.minRepeats !== null && group.maxRepeats !== null ? ', ' : ''}
+                                  {group.maxRepeats !== null ? `max: ${group.maxRepeats}` : ''})
+                                </span>
+                              )}
+                            </CardDescription>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => openGroupDialog(group)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteGroup(group.id)}
+                              disabled={deletingGroupId === group.id}
+                            >
+                              {deletingGroupId === group.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        {group.fields && group.fields.length > 0 ? (
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium text-muted-foreground mb-2">Champs du groupe:</p>
+                            <div className="flex flex-wrap gap-2">
+                              {group.fields.map((field) => (
+                                <Badge key={field.id} variant="outline">
+                                  {field.label} ({field.name})
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            Aucun champ dans ce groupe. Ajoutez des champs à ce groupe lors de leur création.
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Section Champs */}
           <Card className="border-border/50 mt-6">
             <CardHeader>
@@ -470,17 +740,29 @@ export default function EditBonTypePage() {
                         <TableHead>Nom</TableHead>
                         <TableHead>Label</TableHead>
                         <TableHead>Type</TableHead>
+                        <TableHead>Groupe</TableHead>
                         <TableHead>Requis</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {fields.map((field) => (
+                      {fields.map((field) => {
+                        const group = field.bonFieldGroupId ? fieldGroups.find(g => g.id === field.bonFieldGroupId) : null
+                        return (
                         <TableRow key={field.id}>
                           <TableCell className="font-mono text-sm">{field.order}</TableCell>
                           <TableCell className="font-mono text-sm">{field.name}</TableCell>
                           <TableCell>{field.label}</TableCell>
                           <TableCell>{getTypeBadge(field.type)}</TableCell>
+                          <TableCell>
+                            {group ? (
+                              <Badge variant="outline" className="bg-purple-500/10 text-purple-500 border-purple-500/20">
+                                {group.label}
+                              </Badge>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">-</span>
+                            )}
+                          </TableCell>
                           <TableCell>
                             {field.required ? (
                               <Badge variant="default" className="bg-green-500/10 text-green-500 border-green-500/20">
@@ -518,7 +800,8 @@ export default function EditBonTypePage() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        )
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -700,6 +983,31 @@ export default function EditBonTypePage() {
             )}
 
             <div className="space-y-2">
+              <Label htmlFor="field-group">
+                Groupe (optionnel)
+              </Label>
+              <Select
+                value={fieldFormData.bonFieldGroupId || 'none'}
+                onValueChange={(value) => setFieldFormData(prev => ({ ...prev, bonFieldGroupId: value === 'none' ? null : value }))}
+              >
+                <SelectTrigger id="field-group">
+                  <SelectValue placeholder="Aucun groupe (champ simple)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Aucun groupe (champ simple)</SelectItem>
+                  {fieldGroups.map((group) => (
+                    <SelectItem key={group.id} value={group.id}>
+                      {group.label} {group.isRepeatable && '(Répétable)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Sélectionnez un groupe pour regrouper ce champ avec d'autres
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="field-validation">
                 Règles de validation (JSON optionnel)
               </Label>
@@ -754,6 +1062,185 @@ export default function EditBonTypePage() {
                 <>
                   <Save className="mr-2 h-4 w-4" />
                   {editingField ? 'Modifier' : 'Créer'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog pour créer/modifier un groupe */}
+      <Dialog open={showGroupDialog} onOpenChange={setShowGroupDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingGroup ? 'Modifier le groupe' : 'Créer un nouveau groupe'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="group-name">
+                  Nom (technique) <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="group-name"
+                  value={groupFormData.name}
+                  onChange={(e) => {
+                    setGroupFormData(prev => ({ ...prev, name: e.target.value }))
+                    if (groupErrors.name) {
+                      setGroupErrors(prev => {
+                        const newErrors = { ...prev }
+                        delete newErrors.name
+                        return newErrors
+                      })
+                    }
+                  }}
+                  placeholder="ex: invoice_line"
+                  className={groupErrors.name ? 'border-destructive' : ''}
+                  disabled={!!editingGroup}
+                />
+                {groupErrors.name && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {groupErrors.name}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Identifiant unique (lettres minuscules, chiffres, underscores)
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="group-label">
+                  Label <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="group-label"
+                  value={groupFormData.label}
+                  onChange={(e) => {
+                    setGroupFormData(prev => ({ ...prev, label: e.target.value }))
+                    if (groupErrors.label) {
+                      setGroupErrors(prev => {
+                        const newErrors = { ...prev }
+                        delete newErrors.label
+                        return newErrors
+                      })
+                    }
+                  }}
+                  placeholder="Ex: Ligne de facture"
+                  className={groupErrors.label ? 'border-destructive' : ''}
+                />
+                {groupErrors.label && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {groupErrors.label}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Texte affiché dans le formulaire
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="group-description">Description</Label>
+              <Textarea
+                id="group-description"
+                value={groupFormData.description}
+                onChange={(e) => setGroupFormData(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="Description du groupe..."
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="group-repeatable"
+                  checked={groupFormData.isRepeatable}
+                  onChange={(e) => setGroupFormData(prev => ({ ...prev, isRepeatable: e.target.checked }))}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="group-repeatable" className="cursor-pointer">
+                  Groupe répétable (tableau)
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Si coché, ce groupe peut être répété plusieurs fois (ex: lignes de facture)
+              </p>
+            </div>
+
+            {groupFormData.isRepeatable && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="group-min-repeats">
+                    Nombre minimum de répétitions
+                  </Label>
+                  <Input
+                    id="group-min-repeats"
+                    type="number"
+                    min="0"
+                    value={groupFormData.minRepeats || ''}
+                    onChange={(e) => setGroupFormData(prev => ({ ...prev, minRepeats: e.target.value ? parseInt(e.target.value) : null }))}
+                    placeholder="Ex: 1"
+                    className={groupErrors.minRepeats ? 'border-destructive' : ''}
+                  />
+                  {groupErrors.minRepeats && (
+                    <p className="text-sm text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {groupErrors.minRepeats}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="group-max-repeats">
+                    Nombre maximum de répétitions
+                  </Label>
+                  <Input
+                    id="group-max-repeats"
+                    type="number"
+                    min="1"
+                    value={groupFormData.maxRepeats || ''}
+                    onChange={(e) => setGroupFormData(prev => ({ ...prev, maxRepeats: e.target.value ? parseInt(e.target.value) : null }))}
+                    placeholder="Ex: 100"
+                    className={groupErrors.maxRepeats ? 'border-destructive' : ''}
+                  />
+                  {groupErrors.maxRepeats && (
+                    <p className="text-sm text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {groupErrors.maxRepeats}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowGroupDialog(false)}
+              disabled={savingGroup}
+            >
+              Annuler
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveGroup}
+              disabled={savingGroup}
+            >
+              {savingGroup ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sauvegarde...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  {editingGroup ? 'Modifier' : 'Créer'}
                 </>
               )}
             </Button>
