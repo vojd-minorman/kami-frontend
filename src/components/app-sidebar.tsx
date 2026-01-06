@@ -1,7 +1,7 @@
 "use client"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers } from "lucide-react"
+import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers, FileSignature } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -45,6 +45,11 @@ export function AppSidebar() {
       title: t.nav.templates,
       href: "/dashboard/templates",
       icon: FileText,
+    },
+    {
+      title: "Mes signatures",
+      href: "/dashboard/signatures",
+      icon: FileSignature,
     },
     {
       title: t.nav.users,

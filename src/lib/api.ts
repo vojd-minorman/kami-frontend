@@ -441,15 +441,59 @@ class ApiClient {
    * Signer un bon
    */
   async signBon(id: string | number, data: {
-    signatureMethod: string
+    signatureMethod?: string
     otpCode?: string
     signatureData?: any
     consentGiven: boolean
+    signatureType?: 'digital' | 'visual' | 'pad' | 'name'
+    signatureId?: string // ID d'une signature sauvegardée
+    signatureName?: string // Nom personnalisé pour génération depuis nom
   }): Promise<any> {
     return this.request(`/bons/${id}/sign`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
+  }
+
+  /**
+   * Ajouter des signataires à un bon avec leur ordre
+   */
+  async addBonSigners(id: string | number, signers: Array<{
+    userId: string
+    order: number
+  }>): Promise<{
+    message: string
+    signers: Array<{
+      id: string
+      fullName: string
+      email: string
+      role: string
+      order: number
+      hasSigned: boolean
+    }>
+  }> {
+    return this.request(`/bons/${id}/signers`, {
+      method: 'POST',
+      body: JSON.stringify({ signers }),
+    })
+  }
+
+  /**
+   * Récupérer les signataires d'un bon
+   */
+  async getBonSigners(id: string | number): Promise<{
+    signers: Array<{
+      id: string
+      fullName: string
+      email: string
+      role: string
+      order: number
+      hasSigned: boolean
+      signedAt?: string
+      signatureMethod?: string
+    }>
+  }> {
+    return this.request(`/bons/${id}/signers`)
   }
 
   /**
@@ -959,6 +1003,310 @@ class ApiClient {
   async deleteBonFieldGroup(bonTypeId: string | number, groupId: string | number): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/bon-types/${bonTypeId}/field-groups/${groupId}`, {
       method: 'DELETE',
+    })
+  }
+
+  // ==================== SIGNATURES ====================
+
+  /**
+   * Récupérer les signatures de l'utilisateur connecté
+   */
+  async getSignatures(): Promise<{
+    signatures: Array<{
+      id: string
+      signatureType: 'digital' | 'visual'
+      signatureData?: string
+      isDefault: boolean
+      isActive: boolean
+      createdAt: string
+    }>
+  }> {
+    return this.request('/signatures')
+  }
+
+  /**
+   * Met à jour une signature (notamment pour définir comme signature par défaut)
+   */
+  async updateSignature(signatureId: string, data: { isDefault?: boolean }): Promise<{
+    message: string
+    signature: any
+  }> {
+    return this.request(`/signatures/${signatureId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Supprime une signature
+   */
+  async deleteSignature(signatureId: string): Promise<{
+    message: string
+  }> {
+    return this.request(`/signatures/${signatureId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
+   * Créer une signature visuelle (depuis une image/données)
+   */
+  async createVisualSignature(signatureData: string): Promise<{
+    message: string
+    signature: any
+  }> {
+    return this.request('/signatures/visual', {
+      method: 'POST',
+      body: JSON.stringify({ signatureData }),
+    })
+  }
+
+  /**
+   * Générer une signature visuelle à partir du nom de l'utilisateur
+   * Génère côté frontend puis enregistre côté backend
+   */
+  async generateSignatureFromName(options?: {
+    name?: string
+    style?: 'cursive' | 'handwritten' | 'formal'
+    width?: number
+    height?: number
+    fontSize?: number
+    color?: string
+  }): Promise<{
+    message: string
+    signature: any
+    signatureDataUrl: string
+  }> {
+    // Générer la signature côté frontend
+    const signatureDataUrl = this.generateSignatureFromNameClient(options || {})
+    
+    // Enregistrer côté backend
+    return this.request('/signatures/generate-from-name', {
+      method: 'POST',
+      body: JSON.stringify({
+        signatureDataUrl,
+        name: options?.name,
+      }),
+    })
+  }
+
+  /**
+   * Génère une signature visuelle côté client (frontend uniquement)
+   */
+  private generateSignatureFromNameClient(options: {
+    name?: string
+    style?: 'cursive' | 'handwritten' | 'formal'
+    width?: number
+    height?: number
+    fontSize?: number
+    color?: string
+  }): string {
+    const {
+      name = '',
+      style = 'cursive',
+      width = 300,
+      height = 100,
+      fontSize = 32,
+      color = '#000000',
+    } = options
+
+    // Créer un canvas virtuel pour générer la signature
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    
+    if (!ctx) {
+      throw new Error('Impossible de créer le contexte canvas')
+    }
+
+    // Configurer le style selon le type
+    let finalFontFamily = 'Brush Script MT, Brush Script, cursive'
+    let finalFontSize = fontSize
+    let fontStyle = 'italic'
+
+    switch (style) {
+      case 'cursive':
+        finalFontFamily = 'Brush Script MT, Brush Script, cursive'
+        finalFontSize = fontSize
+        fontStyle = 'italic'
+        break
+      case 'handwritten':
+        finalFontFamily = 'Comic Sans MS, Marker Felt, cursive'
+        finalFontSize = fontSize * 0.9
+        fontStyle = 'normal'
+        break
+      case 'formal':
+        finalFontFamily = 'Times New Roman, serif'
+        finalFontSize = fontSize * 0.8
+        fontStyle = 'italic'
+        break
+    }
+
+    ctx.font = `${fontStyle} ${finalFontSize}px ${finalFontFamily}`
+    ctx.fillStyle = color
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    // Ajouter une légère rotation pour un effet plus naturel
+    ctx.save()
+    ctx.translate(width / 2, height / 2)
+    ctx.rotate((Math.random() * 0.1 - 0.05) * Math.PI)
+
+    // Dessiner le nom
+    const offsetX = (Math.random() * 4 - 2)
+    const offsetY = (Math.random() * 4 - 2)
+    ctx.fillText(name, offsetX, offsetY)
+
+    // Pas de ligne sous la signature (demandé par l'utilisateur)
+    ctx.restore()
+
+    // Convertir en data URL
+    return canvas.toDataURL('image/png')
+  }
+
+  /**
+   * Créer une signature depuis un pad tactile
+   * Génère côté frontend puis enregistre côté backend
+   */
+  async createSignatureFromPad(signatureData: Array<{
+    x: number
+    y: number
+    pressure?: number
+    timestamp?: number
+  }>, options?: {
+    width?: number
+    height?: number
+    color?: string
+    lineWidth?: number
+  }): Promise<{
+    message: string
+    signature: any
+    signatureDataUrl: string
+  }> {
+    // Générer la signature côté frontend
+    const signatureDataUrl = this.generateSignatureFromPadClient(signatureData, options || {})
+    
+    // Enregistrer côté backend
+    return this.request('/signatures/pad', {
+      method: 'POST',
+      body: JSON.stringify({
+        signatureDataUrl,
+      }),
+    })
+  }
+
+  /**
+   * Génère une signature depuis un pad côté client (frontend uniquement)
+   */
+  private generateSignatureFromPadClient(
+    signatureData: Array<{ x: number; y: number; pressure?: number; timestamp?: number }>,
+    options: {
+      width?: number
+      height?: number
+      color?: string
+      lineWidth?: number
+    }
+  ): string {
+    const {
+      width = 300,
+      height = 100,
+      color = '#000000',
+      lineWidth = 2
+    } = options
+
+    if (!signatureData || signatureData.length === 0) {
+      throw new Error('Les données de signature sont requises')
+    }
+
+    // Trouver les limites des données
+    const minX = Math.min(...signatureData.map(p => p.x))
+    const maxX = Math.max(...signatureData.map(p => p.x))
+    const minY = Math.min(...signatureData.map(p => p.y))
+    const maxY = Math.max(...signatureData.map(p => p.y))
+
+    const dataWidth = maxX - minX || width
+    const dataHeight = maxY - minY || height
+
+    // Calculer le facteur d'échelle
+    const scaleX = (width * 0.9) / dataWidth
+    const scaleY = (height * 0.9) / dataHeight
+    const scale = Math.min(scaleX, scaleY)
+
+    // Calculer le décalage pour centrer
+    const offsetX = (width - dataWidth * scale) / 2 - minX * scale
+    const offsetY = (height - dataHeight * scale) / 2 - minY * scale
+
+    // Créer le canvas
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    
+    if (!ctx) {
+      throw new Error('Impossible de créer le contexte canvas')
+    }
+
+    // Dessiner les traits
+    ctx.strokeStyle = color
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    let currentPath: Array<{ x: number; y: number }> = []
+
+    for (let i = 0; i < signatureData.length; i++) {
+      const point = signatureData[i]
+      const x = point.x * scale + offsetX
+      const y = point.y * scale + offsetY
+
+      const pressure = point.pressure || 1
+      ctx.lineWidth = lineWidth * pressure
+
+      if (i === 0 || (point.timestamp && i > 0 && (point.timestamp - (signatureData[i - 1].timestamp || 0)) > 100)) {
+        // Nouveau trait
+        if (currentPath.length > 1) {
+          ctx.beginPath()
+          ctx.moveTo(currentPath[0].x, currentPath[0].y)
+          for (let j = 1; j < currentPath.length; j++) {
+            ctx.lineTo(currentPath[j].x, currentPath[j].y)
+          }
+          ctx.stroke()
+        }
+        currentPath = [{ x, y }]
+      } else {
+        currentPath.push({ x, y })
+      }
+    }
+
+    // Dessiner le dernier trait
+    if (currentPath.length > 1) {
+      ctx.beginPath()
+      ctx.moveTo(currentPath[0].x, currentPath[0].y)
+      for (let j = 1; j < currentPath.length; j++) {
+        ctx.lineTo(currentPath[j].x, currentPath[j].y)
+      }
+      ctx.stroke()
+    }
+
+    // Convertir en data URL
+    return canvas.toDataURL('image/png')
+  }
+
+  /**
+   * Créer une signature numérique
+   */
+  async createDigitalSignature(options?: {
+    algorithm?: 'RSA' | 'ECDSA' | 'EDDSA'
+    hashAlgorithm?: 'sha256' | 'sha384' | 'sha512'
+    keySize?: number
+    curve?: 'P-256' | 'P-384' | 'P-521'
+  }): Promise<{
+    message: string
+    signature: any
+  }> {
+    return this.request('/signatures/digital', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
     })
   }
 }

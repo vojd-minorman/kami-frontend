@@ -20,11 +20,14 @@ import {
   MapPin,
   User,
   FileText,
+  Users,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
 import { api, type Bon, type BonType } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { BonSignersDialog } from '@/components/bon-signers-dialog'
+import { BonSignatureDialog } from '@/components/bon-signature-dialog'
 
 export default function VoucherDetailPage() {
   const router = useRouter()
@@ -38,6 +41,8 @@ export default function VoucherDetailPage() {
   const [bon, setBon] = useState<Bon | null>(null)
   const [bonType, setBonType] = useState<BonType | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [signersDialogOpen, setSignersDialogOpen] = useState(false)
+  const [signatureDialogOpen, setSignatureDialogOpen] = useState(false)
 
   useEffect(() => {
     if (user && bonId) {
@@ -52,22 +57,14 @@ export default function VoucherDetailPage() {
       const bonData = await api.getBon(bonId)
       setBon(bonData)
       
-      // Charger le type de bon avec ses groupes et champs pour l'affichage
-      if (bonData.bonTypeId) {
+      // Le bonType est déjà préchargé avec fields et fieldGroups par le backend
+      if (bonData.bonType) {
+        setBonType(bonData.bonType)
+      } else if (bonData.bonTypeId) {
+        // Fallback: charger le type de bon si non préchargé
         try {
           const bonTypeData = await api.getBonType(bonData.bonTypeId)
           setBonType(bonTypeData)
-          
-          // Si les groupes ne sont pas chargés, les charger séparément
-          if (!bonTypeData.fieldGroups || bonTypeData.fieldGroups.length === 0) {
-            try {
-              const fieldGroups = await api.getBonFieldGroups(bonData.bonTypeId)
-              bonTypeData.fieldGroups = fieldGroups
-              setBonType({ ...bonTypeData })
-            } catch (err) {
-              console.error('Error loading field groups:', err)
-            }
-          }
         } catch (err) {
           console.error('Error loading bon type:', err)
           // Ne pas bloquer si le type de bon ne peut pas être chargé
@@ -265,9 +262,33 @@ export default function VoucherDetailPage() {
                 </Button>
               </>
             )}
-            {bon.status === 'DRAFT' && (
+            {bon.status === 'DRAFT' && bon.createdBy === user?.id && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setSignersDialogOpen(true)}
+                  disabled={processing}
+                  className="flex-1 sm:flex-none"
+                >
+                  <Users className="mr-2 h-4 w-4" />
+                  Signataires
+                </Button>
+                <Button
+                  variant="default"
+                  onClick={() => setSignatureDialogOpen(true)}
+                  disabled={processing}
+                  className="flex-1 sm:flex-none"
+                >
+                  <FileSignature className="mr-2 h-4 w-4" />
+                  Signer
+                </Button>
+              </>
+            )}
+            {/* Bouton pour signer si l'utilisateur est dans les signataires et peut signer */}
+            {bon.status === 'DRAFT' && bon.createdBy !== user?.id && (
               <Button
                 variant="default"
+                onClick={() => setSignatureDialogOpen(true)}
                 disabled={processing}
                 className="flex-1 sm:flex-none"
               >
@@ -356,11 +377,14 @@ export default function VoucherDetailPage() {
                   // Créer un mapping complet des champs (nom technique -> label + type)
                   const fieldMap = new Map<string, { label: string; type?: string }>()
                   
-                  // Mapper les champs simples
+                  // Mapper les champs simples (hors groupes)
                   if (bonType?.fields) {
                     bonType.fields.forEach((field: any) => {
                       if (!field.bonFieldGroupId) {
-                        fieldMap.set(field.name, { label: field.label || field.name, type: field.type })
+                        fieldMap.set(field.name, { 
+                          label: field.label || field.name, 
+                          type: field.type 
+                        })
                       }
                     })
                   }
@@ -368,33 +392,45 @@ export default function VoucherDetailPage() {
                   // Mapper les champs dans les groupes
                   if (bonType?.fieldGroups) {
                     bonType.fieldGroups.forEach((group: any) => {
-                      if (group.fields) {
+                      if (group.fields && Array.isArray(group.fields)) {
                         group.fields.forEach((field: any) => {
-                          fieldMap.set(field.name, { label: field.label || field.name, type: field.type })
+                          fieldMap.set(field.name, { 
+                            label: field.label || field.name, 
+                            type: field.type 
+                          })
                         })
                       }
                     })
                   }
                   
-                  // Créer un mapping des groupes (nom technique -> label)
-                  const groupMap = new Map<string, { label: string; isRepeatable: boolean; fields?: any[] }>()
+                  // Créer un mapping des groupes (nom technique -> label + propriétés)
+                  const groupMap = new Map<string, { label: string; isRepeatable: boolean; fields?: any[]; order?: number }>()
                   if (bonType?.fieldGroups) {
                     bonType.fieldGroups.forEach((group: any) => {
                       groupMap.set(group.name, {
                         label: group.label || group.name,
-                        isRepeatable: group.isRepeatable,
-                        fields: group.fields || []
+                        isRepeatable: group.isRepeatable || false,
+                        fields: group.fields || [],
+                        order: group.order || 0
                       })
                     })
                   }
                   
-                  // Fonction pour formater une valeur
-                  const formatValue = (value: any, fieldType?: string) => {
+                  // Fonction pour formater une valeur selon son type
+                  const formatValue = (value: any, fieldType?: string): string => {
+                    if (value === undefined || value === null) {
+                      return 'N/A'
+                    }
+                    
                     if (fieldType === 'checkbox') {
-                      return value === true || value === 'true' || value === 1 ? 'Oui' : 'Non'
+                      return value === true || value === 'true' || value === 1 || value === '1' ? 'Oui' : 'Non'
                     } else if (fieldType === 'date' || fieldType === 'datetime') {
                       try {
-                        return new Date(value).toLocaleDateString('fr-FR', {
+                        const date = new Date(value)
+                        if (isNaN(date.getTime())) {
+                          return String(value)
+                        }
+                        return date.toLocaleDateString('fr-FR', {
                           day: 'numeric',
                           month: 'long',
                           year: 'numeric',
@@ -403,19 +439,55 @@ export default function VoucherDetailPage() {
                       } catch (e) {
                         return String(value)
                       }
+                    } else if (fieldType === 'number') {
+                      return typeof value === 'number' ? value.toString() : String(value)
+                    } else if (typeof value === 'object' && !Array.isArray(value)) {
+                      // Objet complexe : afficher en JSON formaté
+                      try {
+                        return JSON.stringify(value, null, 2)
+                      } catch (e) {
+                        return String(value)
+                      }
+                    } else if (Array.isArray(value)) {
+                      // Tableau : afficher comme liste
+                      return value.length > 0 ? value.join(', ') : 'Aucun'
                     }
+                    
                     return String(value)
+                  }
+                  
+                  // Fonction pour obtenir un label lisible à partir d'un nom technique
+                  const getReadableLabel = (technicalName: string): string => {
+                    // Si on a un mapping, l'utiliser
+                    const fieldInfo = fieldMap.get(technicalName)
+                    if (fieldInfo?.label) {
+                      return fieldInfo.label
+                    }
+                    
+                    // Sinon, convertir le nom technique en label lisible
+                    // Ex: "invoice_line" -> "Invoice Line", "dg_model" -> "Dg Model"
+                    return technicalName
+                      .replace(/_/g, ' ')
+                      .replace(/([A-Z])/g, ' $1')
+                      .split(' ')
+                      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                      .join(' ')
+                      .trim()
                   }
                   
                   // Séparer les champs simples des groupes
                   const simpleFields: Array<[string, any]> = []
                   const groupFields: Array<[string, any]> = []
+                  const unmappedFields: Array<[string, any]> = []
                   
                   Object.entries(bon.values).forEach(([key, value]) => {
                     if (groupMap.has(key)) {
                       groupFields.push([key, value])
-                    } else {
+                    } else if (fieldMap.has(key)) {
                       simpleFields.push([key, value])
+                    } else {
+                      // Champ non mappé (peut être un champ orphelin ou une valeur système)
+                      unmappedFields.push([key, value])
                     }
                   })
                   
@@ -428,7 +500,7 @@ export default function VoucherDetailPage() {
                             if (value === undefined || value === null || value === '') return null
                             
                             const fieldInfo = fieldMap.get(key)
-                            const label = fieldInfo?.label || key.replace(/([A-Z])/g, ' $1').trim()
+                            const label = fieldInfo?.label || getReadableLabel(key)
                             const displayValue = formatValue(value, fieldInfo?.type)
                             
                             return (
@@ -446,8 +518,8 @@ export default function VoucherDetailPage() {
                         <div className="space-y-4 border-t pt-4">
                           {groupFields
                             .sort(([keyA], [keyB]) => {
-                              const groupA = bonType?.fieldGroups?.find(g => g.name === keyA)
-                              const groupB = bonType?.fieldGroups?.find(g => g.name === keyB)
+                              const groupA = groupMap.get(keyA)
+                              const groupB = groupMap.get(keyB)
                               return (groupA?.order || 0) - (groupB?.order || 0)
                             })
                             .map(([key, groupValue]) => {
@@ -471,7 +543,7 @@ export default function VoucherDetailPage() {
                                                 if (fieldValue === undefined || fieldValue === null || fieldValue === '') return null
                                                 
                                                 const fieldInfo = fieldMap.get(fieldName)
-                                                const label = fieldInfo?.label || fieldName.replace(/([A-Z])/g, ' $1').trim()
+                                                const label = fieldInfo?.label || getReadableLabel(fieldName)
                                                 const displayValue = formatValue(fieldValue, fieldInfo?.type)
                                                 
                                                 return (
@@ -485,16 +557,18 @@ export default function VoucherDetailPage() {
                                           </div>
                                         ))}
                                       </div>
-                                    ) : null
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground pl-4">Aucune ligne</p>
+                                    )
                                   ) : (
                                     // Groupe simple (objet)
-                                    typeof groupValue === 'object' && !Array.isArray(groupValue) ? (
+                                    typeof groupValue === 'object' && !Array.isArray(groupValue) && groupValue !== null ? (
                                       <div className="space-y-1 pl-4 border-l-2 border-border">
                                         {Object.entries(groupValue).map(([fieldName, fieldValue]) => {
                                           if (fieldValue === undefined || fieldValue === null || fieldValue === '') return null
                                           
                                           const fieldInfo = fieldMap.get(fieldName)
-                                          const label = fieldInfo?.label || fieldName.replace(/([A-Z])/g, ' $1').trim()
+                                          const label = fieldInfo?.label || getReadableLabel(fieldName)
                                           const displayValue = formatValue(fieldValue, fieldInfo?.type)
                                           
                                           return (
@@ -505,11 +579,35 @@ export default function VoucherDetailPage() {
                                           )
                                         })}
                                       </div>
-                                    ) : null
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground pl-4">Aucune donnée</p>
+                                    )
                                   )}
                                 </div>
                               )
                             })}
+                        </div>
+                      )}
+                      
+                      {/* Afficher les champs non mappés (fallback) */}
+                      {unmappedFields.length > 0 && (
+                        <div className="space-y-3 border-t pt-4">
+                          <p className="text-xs text-muted-foreground italic">
+                            Champs supplémentaires
+                          </p>
+                          {unmappedFields.map(([key, value]) => {
+                            if (value === undefined || value === null || value === '') return null
+                            
+                            const label = getReadableLabel(key)
+                            const displayValue = formatValue(value)
+                            
+                            return (
+                              <div key={key} className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">{label}:</span>
+                                <span className="font-medium">{displayValue}</span>
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -561,6 +659,30 @@ export default function VoucherDetailPage() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Dialogs */}
+        {bon && (
+          <>
+            <BonSignersDialog
+              open={signersDialogOpen}
+              onOpenChange={setSignersDialogOpen}
+              bonId={bonId}
+              onSuccess={() => {
+                loadBon()
+                setSignersDialogOpen(false)
+              }}
+            />
+            <BonSignatureDialog
+              open={signatureDialogOpen}
+              onOpenChange={setSignatureDialogOpen}
+              bonId={bonId}
+              onSuccess={() => {
+                loadBon()
+                setSignatureDialogOpen(false)
+              }}
+            />
+          </>
+        )}
       </div>
     </DashboardShell>
   )

@@ -61,6 +61,7 @@ import {
   ZoomOut,
   Layers,
   Grid3x3,
+  FileSignature,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -213,6 +214,52 @@ function DraggableField({ field }: { field: BonField }) {
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium truncate">{field.label}</p>
           <p className="text-xs text-muted-foreground truncate">({field.name})</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Composant pour un emplacement de signature draggable
+function DraggableSignature({ 
+  label, 
+  placeholder, 
+  order 
+}: { 
+  label: string
+  placeholder: string
+  order?: number 
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `signature-${placeholder}`,
+    data: {
+      type: 'signature',
+      placeholder,
+      order,
+    },
+  })
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={cn(
+        "p-2 rounded-md border bg-blue-50 hover:bg-blue-100 cursor-grab active:cursor-grabbing transition-colors border-blue-200",
+        isDragging && "opacity-50"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <FileSignature className="h-3 w-3 text-blue-600" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium truncate text-blue-900">{label}</p>
+          <p className="text-xs text-blue-600 truncate">({`{{${placeholder}}}`})</p>
         </div>
       </div>
     </div>
@@ -1018,12 +1065,30 @@ export default function EditTemplatePage() {
     setShowDataBinding(false)
   }
 
+  // Fonction pour insérer un emplacement de signature
+  const handleInsertSignature = (order?: number) => {
+    if (!editor) return
+    
+    const placeholder = order ? `{{signature_${order}}}` : '{{signatures}}'
+    const displayText = order ? `Signature ${order}` : 'Signatures'
+    const spanHTML = `<span style="background-color: #dbeafe; padding: 4px 8px; border-radius: 4px; font-weight: 500; border: 1px dashed #3b82f6;">${displayText} (${placeholder})</span>`
+    
+    editor.chain()
+      .focus()
+      .insertContent(spanHTML, {
+        parseOptions: {
+          preserveWhitespace: 'full' as const,
+        },
+      })
+      .run()
+  }
+
   // Gestion du drag & drop
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event
     const data = active.data.current
-    if (data?.type === 'field' || data?.type === 'group-field') {
-      setActiveField(data.field)
+    if (data?.type === 'field' || data?.type === 'group-field' || data?.type === 'signature') {
+      setActiveField(data.field || data)
     }
   }
 
@@ -1055,6 +1120,14 @@ export default function EditTemplatePage() {
           if (!editor) return
           editor.commands.focus()
           handleLinkToField(field.name, field.label, groupName)
+        }, 10)
+      } else if (data?.type === 'signature') {
+        // Emplacement de signature
+        const order = data.order
+        setTimeout(() => {
+          if (!editor) return
+          editor.commands.focus()
+          handleInsertSignature(order)
         }, 10)
       }
     }
@@ -1772,6 +1845,31 @@ export default function EditTemplatePage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Section Signatures */}
+                  <div className="mt-4 pt-4 border-t">
+                    <h4 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Emplacements de signature</h4>
+                    <div className="space-y-1">
+                      {/* Emplacement générique pour toutes les signatures */}
+                      <DraggableSignature 
+                        label="Toutes les signatures"
+                        placeholder="signatures"
+                        order={undefined}
+                      />
+                      {/* Emplacements spécifiques par ordre (1, 2, 3, etc.) */}
+                      {[1, 2, 3, 4, 5].map((order) => (
+                        <DraggableSignature
+                          key={order}
+                          label={`Signature ${order}`}
+                          placeholder={`signature_${order}`}
+                          order={order}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2 px-2">
+                      Glissez-déposez pour placer un emplacement de signature dans le template
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
