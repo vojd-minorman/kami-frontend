@@ -24,6 +24,7 @@ import {
   Star,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
+import { PermissionGuard } from '@/components/permission-guard'
 import { api } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { useToast } from '@/hooks/use-toast'
@@ -547,8 +548,9 @@ export default function SignaturesPage() {
   }
 
   return (
-    <DashboardShell>
-      <div className="space-y-4 md:space-y-6">
+    <PermissionGuard permission="signature.read">
+      <DashboardShell>
+        <div className="space-y-4 md:space-y-6">
         {/* Header */}
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Mes signatures</h1>
@@ -947,7 +949,8 @@ export default function SignaturesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </DashboardShell>
+      </DashboardShell>
+    </PermissionGuard>
   )
 }
 

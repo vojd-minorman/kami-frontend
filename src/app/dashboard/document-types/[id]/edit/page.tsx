@@ -35,41 +35,46 @@ import { Separator } from '@/components/ui/separator'
 import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Edit, Trash2, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type BonType, type BonField, type BonFieldGroup } from '@/lib/api'
+import { api, type DocumentType, type DocumentField, type DocumentFieldGroup, type Category } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 
-export default function EditBonTypePage() {
+export default function EditDocumentTypePage() {
   const router = useRouter()
   const params = useParams()
-  const bonTypeId = params?.id as string
+  const documentTypeId = params?.id as string
   const { user } = useAuth()
   
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [bonType, setBonType] = useState<BonType | null>(null)
-  const [fields, setFields] = useState<BonField[]>([])
+  const [documentType, setDocumentType] = useState<DocumentType | null>(null)
+  const [fields, setFields] = useState<DocumentField[]>([])
   const [loadingFields, setLoadingFields] = useState(false)
-  const [fieldGroups, setFieldGroups] = useState<BonFieldGroup[]>([])
+  const [fieldGroups, setFieldGroups] = useState<DocumentFieldGroup[]>([])
   const [loadingFieldGroups, setLoadingFieldGroups] = useState(false)
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [loadingCategories, setLoadingCategories] = useState(false)
+  const [allDocumentTypes, setAllDocumentTypes] = useState<DocumentType[]>([])
+  const [loadingDocumentTypes, setLoadingDocumentTypes] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     code: '',
     description: '',
+    categoryId: '',
     status: 'active' as 'active' | 'inactive',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
   
   // Dialog pour créer/modifier un champ
   const [showFieldDialog, setShowFieldDialog] = useState(false)
-  const [editingField, setEditingField] = useState<BonField | null>(null)
+  const [editingField, setEditingField] = useState<DocumentField | null>(null)
   const [fieldFormData, setFieldFormData] = useState({
     name: '',
     label: '',
-    type: 'text' as BonField['type'],
+    type: 'text' as DocumentField['type'],
     required: false,
     options: '',
     validationRules: '',
-    bonFieldGroupId: null as string | null,
+    documentFieldGroupId: null as string | null,
   })
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [savingField, setSavingField] = useState(false)
@@ -77,7 +82,7 @@ export default function EditBonTypePage() {
 
   // Dialog pour créer/modifier un groupe
   const [showGroupDialog, setShowGroupDialog] = useState(false)
-  const [editingGroup, setEditingGroup] = useState<BonFieldGroup | null>(null)
+  const [editingGroup, setEditingGroup] = useState<DocumentFieldGroup | null>(null)
   const [groupFormData, setGroupFormData] = useState({
     name: '',
     label: '',
@@ -92,28 +97,31 @@ export default function EditBonTypePage() {
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (user && bonTypeId) {
-      loadBonType()
+    if (user && documentTypeId) {
+      loadDocumentType()
       loadFields()
       loadFieldGroups()
+      loadCategories()
+      loadAllDocumentTypes()
     }
-  }, [user, bonTypeId])
+  }, [user, documentTypeId])
 
-  const loadBonType = async () => {
+  const loadDocumentType = async () => {
     try {
       setLoading(true)
-      const data = await api.getBonType(bonTypeId)
-      setBonType(data)
+      const data = await api.getDocumentType(documentTypeId)
+      setDocumentType(data)
       setFormData({
         name: data.name || '',
         code: data.code || '',
         description: data.description || '',
+        categoryId: data.categoryId || '',
         status: data.status || 'active',
       })
     } catch (error: any) {
-      console.error('Error loading bon type:', error)
-      alert(error.message || 'Erreur lors du chargement du type de bon')
-      router.push('/dashboard/bon-types')
+      console.error('Error loading document type:', error)
+      alert(error.message || 'Erreur lors du chargement du type de document')
+      router.push('/dashboard/document-types')
     } finally {
       setLoading(false)
     }
@@ -122,7 +130,7 @@ export default function EditBonTypePage() {
   const loadFields = async () => {
     try {
       setLoadingFields(true)
-      const fieldsData = await api.getBonFields(bonTypeId)
+      const fieldsData = await api.getDocumentFields(documentTypeId)
       setFields(fieldsData)
     } catch (error: any) {
       console.error('Error loading fields:', error)
@@ -134,12 +142,36 @@ export default function EditBonTypePage() {
   const loadFieldGroups = async () => {
     try {
       setLoadingFieldGroups(true)
-      const groupsData = await api.getBonFieldGroups(bonTypeId)
+      const groupsData = await api.getDocumentFieldGroups(documentTypeId)
       setFieldGroups(groupsData)
     } catch (error: any) {
       console.error('Error loading field groups:', error)
     } finally {
       setLoadingFieldGroups(false)
+    }
+  }
+
+  const loadCategories = async () => {
+    try {
+      setLoadingCategories(true)
+      const cats = await api.getCategories({ status: 'active' })
+      setCategories(cats)
+    } catch (error) {
+      console.error('Error loading categories:', error)
+    } finally {
+      setLoadingCategories(false)
+    }
+  }
+
+  const loadAllDocumentTypes = async () => {
+    try {
+      setLoadingDocumentTypes(true)
+      const types = await api.getDocumentTypes()
+      setAllDocumentTypes(types)
+    } catch (error) {
+      console.error('Error loading document types:', error)
+    } finally {
+      setLoadingDocumentTypes(false)
     }
   }
 
@@ -174,34 +206,39 @@ export default function EditBonTypePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!validateForm() || !bonType) {
+    if (!validateForm() || !documentType) {
       return
     }
 
     try {
       setSaving(true)
       
-      const bonTypeData = {
+      const documentTypeData = {
         name: formData.name.trim(),
         code: formData.code.trim().toUpperCase(),
         description: formData.description.trim() || null,
+        categoryId: formData.categoryId || null,
         status: formData.status,
       }
 
-      await api.updateBonType(bonTypeId, bonTypeData)
+      await api.updateDocumentType(documentTypeId, documentTypeData)
       
-      // Recharger les données
-      await loadBonType()
+      // Rediriger vers la liste des types de documents
+      router.push('/dashboard/document-types')
     } catch (error: any) {
-      console.error('Error updating bon type:', error)
-      alert(error.message || 'Erreur lors de la mise à jour du type de bon')
-    } finally {
+      console.error('Error updating document type:', error)
+      // Gérer spécifiquement l'erreur de code dupliqué
+      if (error.message?.includes('existe déjà') || error.message?.includes('DUPLICATE_CODE')) {
+        setErrors({ code: 'Ce code est déjà utilisé par un autre type de document' })
+      } else {
+        alert(error.message || 'Erreur lors de la mise à jour du type de document')
+      }
       setSaving(false)
     }
   }
 
   // Gestion des champs
-  const openFieldDialog = (field?: BonField) => {
+  const openFieldDialog = (field?: DocumentField) => {
     if (field) {
       setEditingField(field)
       setFieldFormData({
@@ -215,7 +252,7 @@ export default function EditBonTypePage() {
         validationRules: field.validationRules && typeof field.validationRules === 'object'
           ? JSON.stringify(field.validationRules, null, 2)
           : (field.validationRules as string) || '',
-        bonFieldGroupId: field.bonFieldGroupId || null,
+        documentFieldGroupId: field.documentFieldGroupId || null,
       })
     } else {
       setEditingField(null)
@@ -226,7 +263,7 @@ export default function EditBonTypePage() {
         required: false,
         options: '',
         validationRules: '',
-        bonFieldGroupId: null,
+        documentFieldGroupId: null,
       })
     }
     setFieldErrors({})
@@ -290,11 +327,11 @@ export default function EditBonTypePage() {
         type: fieldFormData.type,
         required: fieldFormData.required,
         order: editingField?.order || fields.length,
-        bonFieldGroupId: fieldFormData.bonFieldGroupId && fieldFormData.bonFieldGroupId !== 'none' ? fieldFormData.bonFieldGroupId : null,
+        documentFieldGroupId: fieldFormData.documentFieldGroupId && fieldFormData.documentFieldGroupId !== 'none' ? fieldFormData.documentFieldGroupId : null,
       }
       
       console.log('[handleSaveField] Field data to send:', JSON.stringify(fieldData, null, 2))
-      console.log('[handleSaveField] bonFieldGroupId from form:', fieldFormData.bonFieldGroupId)
+      console.log('[handleSaveField] documentFieldGroupId from form:', fieldFormData.documentFieldGroupId)
 
       // Parser les options et validationRules si fournis
       if (fieldFormData.options.trim()) {
@@ -305,9 +342,9 @@ export default function EditBonTypePage() {
       }
 
       if (editingField) {
-        await api.updateBonField(bonTypeId, editingField.id, fieldData)
+        await api.updateDocumentField(documentTypeId, editingField.id, fieldData)
       } else {
-        await api.createBonField(bonTypeId, fieldData)
+        await api.createDocumentField(documentTypeId, fieldData)
       }
 
       setShowFieldDialog(false)
@@ -328,7 +365,7 @@ export default function EditBonTypePage() {
 
     try {
       setDeletingFieldId(fieldId)
-      await api.deleteBonField(bonTypeId, fieldId)
+      await api.deleteDocumentField(documentTypeId, fieldId)
       await loadFields()
       await loadFieldGroups() // Recharger les groupes car ils peuvent contenir ce champ
     } catch (error: any) {
@@ -340,7 +377,7 @@ export default function EditBonTypePage() {
   }
 
   // Gestion des groupes
-  const openGroupDialog = (group?: BonFieldGroup) => {
+  const openGroupDialog = (group?: DocumentFieldGroup) => {
     if (group) {
       setEditingGroup(group)
       setGroupFormData({
@@ -428,9 +465,9 @@ export default function EditBonTypePage() {
       }
 
       if (editingGroup) {
-        await api.updateBonFieldGroup(bonTypeId, editingGroup.id, groupData)
+        await api.updateDocumentFieldGroup(documentTypeId, editingGroup.id, groupData)
       } else {
-        await api.createBonFieldGroup(bonTypeId, groupData)
+        await api.createDocumentFieldGroup(documentTypeId, groupData)
       }
 
       setShowGroupDialog(false)
@@ -450,7 +487,7 @@ export default function EditBonTypePage() {
 
     try {
       setDeletingGroupId(groupId)
-      await api.deleteBonFieldGroup(bonTypeId, groupId)
+      await api.deleteDocumentFieldGroup(documentTypeId, groupId)
       await loadFieldGroups()
       await loadFields() // Recharger les champs car certains peuvent avoir été supprimés
     } catch (error: any) {
@@ -461,14 +498,17 @@ export default function EditBonTypePage() {
     }
   }
 
-  const getTypeBadge = (type: BonField['type']) => {
-    const colors: Record<BonField['type'], string> = {
+  const getTypeBadge = (type: DocumentField['type']) => {
+    const colors: Record<DocumentField['type'], string> = {
       text: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
       number: 'bg-green-500/10 text-green-500 border-green-500/20',
       date: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
       datetime: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
       select: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
       checkbox: 'bg-pink-500/10 text-pink-500 border-pink-500/20',
+      textarea: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
+      file: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+      document_link: 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
     }
     return <Badge variant="outline" className={colors[type]}>{type}</Badge>
   }
@@ -504,15 +544,15 @@ export default function EditBonTypePage() {
       <div className="space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <Link href="/dashboard/bon-types">
+          <Link href="/dashboard/document-types">
             <Button variant="ghost" size="icon" className="h-10 w-10">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
           <div className="flex-1">
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Modifier le type de bon</h1>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Modifier le type de document</h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              {bonType?.name || 'Chargement...'}
+              {documentType?.name || 'Chargement...'}
             </p>
           </div>
         </div>
@@ -522,7 +562,7 @@ export default function EditBonTypePage() {
             <CardHeader>
               <CardTitle className="text-lg md:text-xl">Informations générales</CardTitle>
               <CardDescription className="text-sm">
-                Modifiez les informations du type de bon
+                Modifiez les informations du type de document
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -534,7 +574,7 @@ export default function EditBonTypePage() {
                   id="name"
                   value={formData.name}
                   onChange={(e) => handleChange('name', e.target.value)}
-                  placeholder="Ex: Bon de livraison"
+                  placeholder="Ex: Document de livraison"
                   className={errors.name ? 'border-destructive' : ''}
                 />
                 {errors.name && (
@@ -571,9 +611,36 @@ export default function EditBonTypePage() {
                   id="description"
                   value={formData.description}
                   onChange={(e) => handleChange('description', e.target.value)}
-                  placeholder="Description du type de bon..."
+                  placeholder="Description du type de document..."
                   rows={4}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="categoryId">Catégorie</Label>
+                {loadingCategories ? (
+                  <Skeleton className="h-10 w-full" />
+                ) : (
+                  <Select
+                    value={formData.categoryId || 'none'}
+                    onValueChange={(value) => handleChange('categoryId', value === 'none' ? '' : value)}
+                  >
+                    <SelectTrigger id="categoryId">
+                      <SelectValue placeholder="Sélectionner une catégorie (optionnel)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Aucune catégorie</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  La catégorie permet d'organiser les types de documents et de gérer les permissions par groupe
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -588,6 +655,60 @@ export default function EditBonTypePage() {
                   <option value="inactive">Inactif</option>
                 </select>
               </div>
+
+              {/* Section Champs de liaison */}
+              {fields.filter(f => f.type === 'document_link').length > 0 && (
+                <div className="space-y-2 pt-4 border-t">
+                  <Label>Champs de liaison configurés</Label>
+                  <div className="space-y-2">
+                    {fields
+                      .filter(f => f.type === 'document_link')
+                      .map((field) => {
+                        let linkConfig: any = {}
+                        try {
+                          linkConfig = field.options ? JSON.parse(field.options) : {}
+                        } catch {}
+                        
+                        const targetType = allDocumentTypes.find(dt => dt.id === linkConfig.targetDocumentTypeId)
+                        
+                        return (
+                          <div key={field.id} className="p-3 border rounded-lg bg-muted/30">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <div className="font-medium text-sm">{field.label || field.name}</div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {targetType ? (
+                                    <>Liaison vers: <strong>{targetType.name}</strong> ({targetType.code})</>
+                                  ) : (
+                                    <>Liaison vers: <strong>Tous les types</strong></>
+                                  )}
+                                </div>
+                                {linkConfig.linkType && (
+                                  <Badge variant="outline" className="mt-1 text-xs">
+                                    Type: {linkConfig.linkType}
+                                  </Badge>
+                                )}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openFieldDialog(field)}
+                                className="h-8"
+                              >
+                                <Edit className="h-3 w-3 mr-1" />
+                                Modifier
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Pour ajouter un nouveau champ de liaison, utilisez le bouton "Ajouter un champ" dans la section "Champs du formulaire" ci-dessous.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -706,7 +827,7 @@ export default function EditBonTypePage() {
                 <div>
                   <CardTitle className="text-lg md:text-xl">Champs du formulaire</CardTitle>
                   <CardDescription className="text-sm">
-                    Définissez les champs qui composeront le formulaire de création de bons
+                    Définissez les champs qui composeront le formulaire de création de documents
                   </CardDescription>
                 </div>
                 <Button type="button" onClick={() => openFieldDialog()}>
@@ -747,7 +868,7 @@ export default function EditBonTypePage() {
                     </TableHeader>
                     <TableBody>
                       {fields.map((field) => {
-                        const group = field.bonFieldGroupId ? fieldGroups.find(g => g.id === field.bonFieldGroupId) : null
+                        const group = field.documentFieldGroupId ? fieldGroups.find(g => g.id === field.documentFieldGroupId) : null
                         return (
                         <TableRow key={field.id}>
                           <TableCell className="font-mono text-sm">{field.order}</TableCell>
@@ -811,7 +932,7 @@ export default function EditBonTypePage() {
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row justify-end gap-4 mt-6">
-            <Link href="/dashboard/bon-types">
+            <Link href="/dashboard/document-types">
               <Button type="button" variant="outline" className="w-full sm:w-auto">
                 Annuler
               </Button>
@@ -914,7 +1035,7 @@ export default function EditBonTypePage() {
                 </Label>
                 <Select
                   value={fieldFormData.type}
-                  onValueChange={(value: BonField['type']) => {
+                  onValueChange={(value: DocumentField['type']) => {
                     setFieldFormData(prev => ({ ...prev, type: value }))
                   }}
                 >
@@ -928,6 +1049,9 @@ export default function EditBonTypePage() {
                     <SelectItem value="datetime">Date et heure</SelectItem>
                     <SelectItem value="select">Sélection</SelectItem>
                     <SelectItem value="checkbox">Case à cocher</SelectItem>
+                    <SelectItem value="textarea">Zone de texte</SelectItem>
+                    <SelectItem value="file">Fichier</SelectItem>
+                    <SelectItem value="document_link">Liaison de document</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -982,13 +1106,100 @@ export default function EditBonTypePage() {
               </div>
             )}
 
+            {fieldFormData.type === 'document_link' && (
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
+                <div className="space-y-2">
+                  <Label htmlFor="field-link-target-type">
+                    Type de document cible <span className="text-destructive">*</span>
+                  </Label>
+                  {loadingDocumentTypes ? (
+                    <Skeleton className="h-10 w-full" />
+                  ) : (
+                    <Select
+                      value={(() => {
+                        try {
+                          const opts = fieldFormData.options ? JSON.parse(fieldFormData.options) : {}
+                          return opts.targetDocumentTypeId || 'none'
+                        } catch {
+                          return 'none'
+                        }
+                      })()}
+                      onValueChange={(value) => {
+                        try {
+                          const currentOpts = fieldFormData.options ? JSON.parse(fieldFormData.options) : {}
+                          const newOpts = { ...currentOpts, targetDocumentTypeId: value === 'none' ? undefined : value }
+                          setFieldFormData(prev => ({ ...prev, options: JSON.stringify(newOpts) }))
+                        } catch (e) {
+                          console.error('Error parsing options:', e)
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="field-link-target-type">
+                        <SelectValue placeholder="Sélectionner un type de document" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Aucun (tous les types)</SelectItem>
+                        {allDocumentTypes
+                          .filter((dt: DocumentType) => dt.id !== documentTypeId)
+                          .map((dt: DocumentType) => (
+                            <SelectItem key={dt.id} value={dt.id}>
+                              {dt.name} ({dt.code})
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="field-link-type">
+                    Type de liaison
+                  </Label>
+                  <Select
+                    value={(() => {
+                      try {
+                        const opts = fieldFormData.options ? JSON.parse(fieldFormData.options) : {}
+                        return opts.linkType || 'reference'
+                      } catch {
+                        return 'reference'
+                      }
+                    })()}
+                    onValueChange={(value) => {
+                      try {
+                        const currentOpts = fieldFormData.options ? JSON.parse(fieldFormData.options) : {}
+                        const newOpts = { ...currentOpts, linkType: value }
+                        setFieldFormData(prev => ({ ...prev, options: JSON.stringify(newOpts) }))
+                      } catch (e) {
+                        console.error('Error parsing options:', e)
+                      }
+                    }}
+                  >
+                    <SelectTrigger id="field-link-type">
+                      <SelectValue placeholder="Type de liaison" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="reference">Référence</SelectItem>
+                      <SelectItem value="parent">Parent</SelectItem>
+                      <SelectItem value="child">Enfant</SelectItem>
+                      <SelectItem value="authorization">Autorisation</SelectItem>
+                      <SelectItem value="entry">Entrée</SelectItem>
+                      <SelectItem value="exit">Sortie</SelectItem>
+                      <SelectItem value="continuation">Suite</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Définit le type de relation entre les documents
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="field-group">
                 Groupe (optionnel)
               </Label>
               <Select
-                value={fieldFormData.bonFieldGroupId || 'none'}
-                onValueChange={(value) => setFieldFormData(prev => ({ ...prev, bonFieldGroupId: value === 'none' ? null : value }))}
+                value={fieldFormData.documentFieldGroupId || 'none'}
+                onValueChange={(value) => setFieldFormData(prev => ({ ...prev, documentFieldGroupId: value === 'none' ? null : value }))}
               >
                 <SelectTrigger id="field-group">
                   <SelectValue placeholder="Aucun groupe (champ simple)" />

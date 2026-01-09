@@ -19,8 +19,8 @@ export function NotificationsNav() {
   const notifications = [
     {
       id: 1,
-      title: "Nouveau bon généré",
-      description: "Le bon #1234 a été créé avec succès",
+      title: "Nouveau document généré",
+      description: "Le document #1234 a été créé avec succès",
       time: "Il y a 5 min",
       unread: true,
     },

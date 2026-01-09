@@ -17,12 +17,13 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Plus, Edit, Eye, CheckCircle2, XCircle, FileText, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
-import { api, type BonType, type PDFTemplate } from '@/lib/api'
+import { api, type DocumentType, type PDFTemplate } from '@/lib/api'
 import { useAuth } from '@/hooks/use-auth'
+import { PermissionGuard } from '@/components/permission-guard'
 import { DashboardShell } from '@/components/dashboard-shell'
 
 interface TemplateInfo {
-  bonType: BonType
+  documentType: DocumentType
   hasTemplate: boolean
   template?: PDFTemplate
 }
@@ -43,22 +44,22 @@ export default function TemplatesPage() {
   const loadTemplates = async () => {
     try {
       setLoading(true)
-      const bonTypes = await api.getBonTypes()
+      const documentTypes = await api.getDocumentTypes()
       
-      // Pour chaque type de bon, vérifier s'il a un template (en parallèle mais avec gestion d'erreur)
+      // Pour chaque type de document, vérifier s'il a un template (en parallèle mais avec gestion d'erreur)
       const templatesInfo: TemplateInfo[] = await Promise.allSettled(
-        bonTypes.map(async (bonType) => {
+        documentTypes.map(async (documentType) => {
           try {
-            const template = await api.getTemplate(bonType.id)
+            const template = await api.getTemplate(documentType.id)
             return {
-              bonType,
+              documentType,
               hasTemplate: true,
               template,
             }
           } catch (error: any) {
             // Si le template n'existe pas, on retourne hasTemplate: false
             return {
-              bonType,
+              documentType,
               hasTemplate: false,
             }
           }
@@ -66,7 +67,7 @@ export default function TemplatesPage() {
       ).then(results => 
         results.map(result => 
           result.status === 'fulfilled' ? result.value : {
-            bonType: bonTypes[results.indexOf(result)],
+            documentType: documentTypes[results.indexOf(result)],
             hasTemplate: false,
           }
         )
@@ -98,14 +99,15 @@ export default function TemplatesPage() {
   }
 
   return (
-    <DashboardShell>
+    <PermissionGuard permission="template.read">
+      <DashboardShell>
       <div className="space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{t.templates.title || 'Templates PDF'}</h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              Gérez les templates PDF pour chaque type de bon
+              Gérez les templates PDF pour chaque type de document
             </p>
           </div>
           <Link href="/dashboard/templates/create">
@@ -122,8 +124,8 @@ export default function TemplatesPage() {
             <CardTitle className="text-lg md:text-xl">Liste des templates PDF</CardTitle>
             <CardDescription className="text-sm">
               {templates.length > 0 
-                ? `${templates.length} type(s) de bon trouvé(s)` 
-                : 'Aucun type de bon'}
+                ? `${templates.length} type(s) de document trouvé(s)` 
+                : 'Aucun type de document'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -140,7 +142,7 @@ export default function TemplatesPage() {
               <div className="text-center py-12">
                 <FileText className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                 <p className="text-muted-foreground mb-4">
-                  Aucun type de bon trouvé
+                  Aucun type de document trouvé
                 </p>
                 <Link href="/dashboard/templates/create">
                   <Button variant="outline">
@@ -154,7 +156,7 @@ export default function TemplatesPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="min-w-[200px]">Type de bon</TableHead>
+                      <TableHead className="min-w-[200px]">Type de document</TableHead>
                       <TableHead className="min-w-[100px]">Code</TableHead>
                       <TableHead className="min-w-[150px]">Statut du template</TableHead>
                       <TableHead className="min-w-[200px]">Informations</TableHead>
@@ -163,19 +165,19 @@ export default function TemplatesPage() {
                   </TableHeader>
                   <TableBody>
                     {templates.map((templateInfo) => (
-                      <TableRow key={templateInfo.bonType.id}>
+                      <TableRow key={templateInfo.documentType.id}>
                         <TableCell>
                           <div className="flex flex-col">
-                            <span className="font-medium">{templateInfo.bonType.name}</span>
-                            {templateInfo.bonType.description && (
+                            <span className="font-medium">{templateInfo.documentType.name}</span>
+                            {templateInfo.documentType.description && (
                               <span className="text-xs text-muted-foreground mt-1">
-                                {templateInfo.bonType.description}
+                                {templateInfo.documentType.description}
                               </span>
                             )}
                           </div>
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {templateInfo.bonType.code}
+                          {templateInfo.documentType.code}
                         </TableCell>
                         <TableCell>
                           {getTemplateStatusBadge(templateInfo.hasTemplate)}
@@ -202,15 +204,15 @@ export default function TemplatesPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            {(!templateInfo.bonType.fields || templateInfo.bonType.fields.length === 0) ? (
-                              <Link href={`/dashboard/bon-types/${templateInfo.bonType.id}/edit`}>
+                            {(!templateInfo.documentType.fields || templateInfo.documentType.fields.length === 0) ? (
+                              <Link href={`/dashboard/document-types/${templateInfo.documentType.id}/edit`}>
                                 <Button variant="outline" size="sm">
                                   <AlertCircle className="h-4 w-4 mr-1" />
                                   Configurer les champs
                                 </Button>
                               </Link>
                             ) : (
-                              <Link href={`/dashboard/templates/${templateInfo.bonType.id}/edit`}>
+                              <Link href={`/dashboard/templates/${templateInfo.documentType.id}/edit`}>
                                 <Button 
                                   variant={templateInfo.hasTemplate ? "default" : "outline"} 
                                   size="sm"
@@ -240,6 +242,7 @@ export default function TemplatesPage() {
           </CardContent>
         </Card>
       </div>
-    </DashboardShell>
+      </DashboardShell>
+    </PermissionGuard>
   )
 }

@@ -17,14 +17,14 @@ interface Signer {
   user?: User
 }
 
-interface BonSignersDialogProps {
+interface DocumentSignersDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  bonId: string
+  documentId: string
   onSuccess?: () => void
 }
 
-export function BonSignersDialog({ open, onOpenChange, bonId, onSuccess }: BonSignersDialogProps) {
+export function DocumentSignersDialog({ open, onOpenChange, documentId, onSuccess }: DocumentSignersDialogProps) {
   const [loading, setLoading] = useState(false)
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [signers, setSigners] = useState<Signer[]>([])
@@ -38,7 +38,7 @@ export function BonSignersDialog({ open, onOpenChange, bonId, onSuccess }: BonSi
       loadUsers()
       loadSigners()
     }
-  }, [open, bonId])
+  }, [open, documentId])
 
   const loadUsers = async () => {
     try {
@@ -59,7 +59,7 @@ export function BonSignersDialog({ open, onOpenChange, bonId, onSuccess }: BonSi
 
   const loadSigners = async () => {
     try {
-      const response = await api.getBonSigners(bonId)
+      const response = await api.getDocumentSigners(documentId)
       const signersWithOrder = response.signers.map((s, index) => ({
         userId: s.id,
         order: s.order ?? index + 1,
@@ -73,7 +73,7 @@ export function BonSignersDialog({ open, onOpenChange, bonId, onSuccess }: BonSi
       setSigners(signersWithOrder.sort((a, b) => a.order - b.order))
     } catch (error: any) {
       console.error('Error loading signers:', error)
-      // Si le bon n'a pas encore de signataires, commencer avec une liste vide
+      // Si le document n'a pas encore de signataires, commencer avec une liste vide
       setSigners([])
     }
   }
@@ -145,7 +145,7 @@ export function BonSignersDialog({ open, onOpenChange, bonId, onSuccess }: BonSi
 
     try {
       setLoading(true)
-      await api.addBonSigners(bonId, signers.map(s => ({
+      await api.addDocumentSigners(documentId, signers.map(s => ({
         userId: s.userId,
         order: s.order,
       })))
@@ -182,7 +182,7 @@ export function BonSignersDialog({ open, onOpenChange, bonId, onSuccess }: BonSi
         <DialogHeader>
           <DialogTitle>Gérer les signataires</DialogTitle>
           <DialogDescription>
-            Ajoutez les utilisateurs qui doivent signer ce bon et définissez leur ordre de signature.
+            Ajoutez les utilisateurs qui doivent signer ce document et définissez leur ordre de signature.
           </DialogDescription>
         </DialogHeader>
 

@@ -15,13 +15,13 @@ import { Eye, Code, Settings } from 'lucide-react'
 interface VisualPDFEditorProps {
   template: PDFTemplate
   onTemplateChange: (template: PDFTemplate) => void
-  bonTypeName?: string
+  documentTypeName?: string
 }
 
 export function VisualPDFEditor({ 
   template, 
   onTemplateChange,
-  bonTypeName 
+  documentTypeName 
 }: VisualPDFEditorProps) {
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'visual' | 'code' | 'preview'>('visual')
@@ -157,7 +157,7 @@ export function VisualPDFEditor({
                 <Card className="p-6">
                   <div className="mb-4">
                     <h2 className="text-lg font-semibold mb-1">
-                      {bonTypeName || 'Template PDF'}
+                      {documentTypeName || 'Template PDF'}
                     </h2>
                     <p className="text-sm text-muted-foreground">
                       Créez votre template en glissant-déposant des éléments ou en utilisant l'éditeur

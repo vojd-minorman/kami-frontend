@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type BonType } from '@/lib/api'
+import { api, type DocumentType } from '@/lib/api'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import Link from 'next/link'
@@ -22,43 +22,48 @@ import Link from 'next/link'
 export default function CreateTemplatePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const bonTypeId = searchParams.get('bonTypeId')
+  const documentTypeId = searchParams.get('documentTypeId')
   const { t } = useLocale()
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   
-  const [bonTypes, setBonTypes] = useState<BonType[]>([])
-  const [selectedBonTypeId, setSelectedBonTypeId] = useState(bonTypeId || '')
+  const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([])
+  const [selectedDocumentTypeId, setSelectedDocumentTypeId] = useState(documentTypeId || '')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (user) {
-      loadBonTypes()
+    if (!authLoading && user) {
+      loadDocumentTypes()
+    } else if (!authLoading && !user) {
+      // Si l'utilisateur n'est pas authentifié, le hook useAuth redirige déjà vers /login
+      setLoading(false)
     }
-  }, [user])
+  }, [user, authLoading])
 
-  const loadBonTypes = async () => {
+  const loadDocumentTypes = async () => {
     try {
       setLoading(true)
-      const types = await api.getBonTypes()
-      setBonTypes(types)
-      if (bonTypeId) {
-        setSelectedBonTypeId(bonTypeId)
+      const types = await api.getDocumentTypes()
+      setDocumentTypes(types)
+      if (documentTypeId) {
+        setSelectedDocumentTypeId(documentTypeId)
       }
-    } catch (error) {
-      console.error('Error loading bon types:', error)
+    } catch (error: any) {
+      console.error('Error loading document types:', error)
+      // Afficher un message d'erreur à l'utilisateur
+      alert(`Erreur lors du chargement des types de documents: ${error?.message || 'Erreur inconnue'}`)
     } finally {
       setLoading(false)
     }
   }
 
   const handleCreate = () => {
-    if (!selectedBonTypeId) {
-      alert('Veuillez sélectionner un type de bon')
+    if (!selectedDocumentTypeId) {
+      alert('Veuillez sélectionner un type de document')
       return
     }
 
     // Rediriger vers l'éditeur
-    router.push(`/dashboard/templates/${selectedBonTypeId}/edit`)
+    router.push(`/dashboard/templates/${selectedDocumentTypeId}/edit`)
   }
 
   return (
@@ -74,7 +79,7 @@ export default function CreateTemplatePage() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{t.templates.create || 'Créer un template'}</h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              Créez un nouveau template PDF pour un type de bon
+              Créez un nouveau template PDF pour un type de document
             </p>
           </div>
         </div>
@@ -84,30 +89,34 @@ export default function CreateTemplatePage() {
         <CardHeader>
           <CardTitle className="text-lg md:text-xl">Configuration du template</CardTitle>
           <CardDescription className="text-sm">
-            Sélectionnez le type de bon pour lequel créer le template
+            Sélectionnez le type de document pour lequel créer le template
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {loading ? (
+          {loading || authLoading ? (
             <div className="space-y-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-10 w-32" />
             </div>
+          ) : !user ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Veuillez vous connecter pour accéder à cette page.</p>
+            </div>
           ) : (
             <>
               <div className="space-y-2">
-                <Label htmlFor="bonType" className="text-sm">Type de bon</Label>
-                <Select value={selectedBonTypeId} onValueChange={setSelectedBonTypeId}>
-                  <SelectTrigger id="bonType">
-                    <SelectValue placeholder="Sélectionner un type de bon" />
+                <Label htmlFor="documentType" className="text-sm">Type de document</Label>
+                <Select value={selectedDocumentTypeId} onValueChange={setSelectedDocumentTypeId}>
+                  <SelectTrigger id="documentType">
+                    <SelectValue placeholder="Sélectionner un type de document" />
                   </SelectTrigger>
                   <SelectContent>
-                    {bonTypes.length === 0 ? (
+                    {documentTypes.length === 0 ? (
                       <div className="p-2 text-sm text-muted-foreground">
-                        Aucun type de bon disponible
+                        Aucun type de document disponible
                       </div>
                     ) : (
-                      bonTypes.map((type) => (
+                      documentTypes.map((type) => (
                         <SelectItem key={type.id} value={type.id.toString()}>
                           {type.name} ({type.code})
                         </SelectItem>
@@ -120,7 +129,7 @@ export default function CreateTemplatePage() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <Button 
                   onClick={handleCreate} 
-                  disabled={!selectedBonTypeId || bonTypes.length === 0}
+                  disabled={!selectedDocumentTypeId || documentTypes.length === 0}
                   className="flex-1 sm:flex-none"
                 >
                   Créer le template

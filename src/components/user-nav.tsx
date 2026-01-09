@@ -20,7 +20,7 @@ export function UserNav() {
   // Mock user data - in production, get from auth context
   const user = {
     name: "Admin User",
-    email: "admin@kami-operation.com",
+    email: "admin@kas-mining.com",
     image: "", // Empty string means we'll use initials
   }
 

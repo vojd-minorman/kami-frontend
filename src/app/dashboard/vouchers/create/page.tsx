@@ -16,11 +16,13 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Trash2, GripVertical } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type BonType, type BonFieldGroup } from '@/lib/api'
+import { api, type DocumentType, type DocumentFieldGroup, type User } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { Badge } from '@/components/ui/badge'
+import { useToast } from '@/hooks/use-toast'
 
 export default function CreateVoucherPage() {
   const router = useRouter()
@@ -29,70 +31,97 @@ export default function CreateVoucherPage() {
   
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [bonTypes, setBonTypes] = useState<BonType[]>([])
-  const [selectedBonType, setSelectedBonType] = useState<BonType | null>(null)
-  const [fieldGroups, setFieldGroups] = useState<BonFieldGroup[]>([])
+  const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([])
+  const [selectedDocumentType, setSelectedDocumentType] = useState<DocumentType | null>(null)
+  const [fieldGroups, setFieldGroups] = useState<DocumentFieldGroup[]>([])
   const [formData, setFormData] = useState<Record<string, any>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
+  
+  // États pour les signataires
+  const [signers, setSigners] = useState<Array<{ userId: string; order: number; user?: User }>>([])
+  const [availableUsers, setAvailableUsers] = useState<User[]>([])
+  const [selectedUserId, setSelectedUserId] = useState<string>('')
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [searchingDocuments, setSearchingDocuments] = useState<Record<string, boolean>>({})
+  const [foundDocuments, setFoundDocuments] = useState<Record<string, any>>({})
+  const { toast } = useToast()
 
   useEffect(() => {
     if (user) {
-      loadBonTypes()
+      loadDocumentTypes()
+      loadUsers()
     }
   }, [user])
+  
+  const loadUsers = async () => {
+    try {
+      setLoadingUsers(true)
+      const response = await api.getUsers({ limit: 100 })
+      setAvailableUsers(response.data || [])
+    } catch (error: any) {
+      console.error('Error loading users:', error)
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de charger les utilisateurs',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoadingUsers(false)
+    }
+  }
 
-  const loadBonTypes = async () => {
+  const loadDocumentTypes = async () => {
     try {
       setLoading(true)
-      const types = await api.getBonTypes()
-      console.log('Loaded bon types:', types)
-      console.log('Bon types with fields:', types.map(t => ({ id: t.id, name: t.name, fieldsCount: t.fields?.length || 0, hasFormStructure: !!t.formStructure })))
-      setBonTypes(types)
+      const types = await api.getDocumentTypes()
+      console.log('Loaded document types:', types)
+      console.log('Document types with fields:', types.map(t => ({ id: t.id, name: t.name, fieldsCount: t.fields?.length || 0, hasFormStructure: !!t.formStructure })))
+      setDocumentTypes(types)
     } catch (error) {
-      console.error('Error loading bon types:', error)
+      console.error('Error loading document types:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleBonTypeChange = async (bonTypeId: string) => {
-    const bonType = bonTypes.find(t => t.id.toString() === bonTypeId || t.id === bonTypeId)
-    console.log('Selected bon type:', bonType)
+  const handleDocumentTypeChange = async (documentTypeId: string) => {
+    const documentType = documentTypes.find(t => t.id.toString() === documentTypeId || t.id === documentTypeId)
+    console.log('Selected document type:', documentType)
     
-    if (bonType) {
+    if (documentType) {
       // Si les fields ne sont pas chargés, les charger
-      if (!bonType.fields || bonType.fields.length === 0) {
+      if (!documentType.fields || documentType.fields.length === 0) {
         console.log('Fields not loaded, fetching from API...')
         try {
-          const fields = await api.getBonFields(bonTypeId)
+          const fields = await api.getDocumentFields(documentTypeId)
           console.log('Loaded fields from API:', fields)
-          bonType.fields = fields
+          documentType.fields = fields
         } catch (error) {
-          console.error('Error loading bon fields:', error)
+          console.error('Error loading document fields:', error)
         }
       } else {
-        console.log('Fields already loaded:', bonType.fields)
+        console.log('Fields already loaded:', documentType.fields)
       }
 
       // Parser formStructure si c'est une string JSON
-      if (bonType.formStructure && typeof bonType.formStructure === 'string') {
+      if (documentType.formStructure && typeof documentType.formStructure === 'string') {
         try {
-          bonType.formStructure = JSON.parse(bonType.formStructure)
+          documentType.formStructure = JSON.parse(documentType.formStructure)
         } catch (e) {
           console.error('Error parsing formStructure:', e)
         }
       }
       
       // Si pas de formStructure OU formStructure.fields est vide, mais qu'on a des fields (relation), créer formStructure
-      const hasFormStructureFields = bonType.formStructure?.fields && bonType.formStructure.fields.length > 0
-      const hasFields = bonType.fields && bonType.fields.length > 0
+      const hasFormStructureFields = documentType.formStructure?.fields && documentType.formStructure.fields.length > 0
+      const hasFields = documentType.fields && documentType.fields.length > 0
       
       if (!hasFormStructureFields && hasFields) {
-        console.log('Creating formStructure from fields:', bonType.fields)
+        console.log('Creating formStructure from fields:', documentType.fields)
         // Séparer les champs simples (sans groupe) des champs dans des groupes
-        const simpleFields = (bonType.fields || []).filter(f => !f.bonFieldGroupId)
-        bonType.formStructure = {
-          ...(bonType.formStructure || {}),
+        const simpleFields = (documentType.fields || []).filter(f => !f.documentFieldGroupId)
+        documentType.formStructure = {
+          ...(documentType.formStructure || {}),
           fields: simpleFields.map(field => {
             // Parser les options pour les champs select
             let parsedOptions = undefined
@@ -135,47 +164,47 @@ export default function CreateVoucherPage() {
             }
           })
         }
-        console.log('Created formStructure:', bonType.formStructure)
+        console.log('Created formStructure:', documentType.formStructure)
       } else if (hasFormStructureFields) {
         // Filtrer les champs qui appartiennent à un groupe (ils doivent être dans les groupes, pas dans formStructure)
-        console.log('Using existing formStructure, filtering group fields:', bonType.formStructure)
-        if (bonType.fields && bonType.fields.length > 0) {
-          // Créer un map des bonFieldGroupId pour vérifier rapidement
+        console.log('Using existing formStructure, filtering group fields:', documentType.formStructure)
+        if (documentType.fields && documentType.fields.length > 0) {
+          // Créer un map des documentFieldGroupId pour vérifier rapidement
           const fieldsInGroups = new Set(
-            bonType.fields.filter(f => f.bonFieldGroupId).map(f => f.name)
+            documentType.fields.filter(f => f.documentFieldGroupId).map(f => f.name)
           )
           
           // Filtrer formStructure.fields pour exclure les champs qui sont dans un groupe
-          if (bonType.formStructure && bonType.formStructure.fields) {
-            bonType.formStructure.fields = bonType.formStructure.fields.filter(
+          if (documentType.formStructure && documentType.formStructure.fields) {
+            documentType.formStructure.fields = documentType.formStructure.fields.filter(
               (field: any) => !fieldsInGroups.has(field.name)
             )
-            console.log('Filtered formStructure fields (excluded group fields):', bonType.formStructure.fields)
+            console.log('Filtered formStructure fields (excluded group fields):', documentType.formStructure.fields)
           }
         }
       } else {
-        console.warn('No fields and no formStructure for bon type:', bonType)
+        console.warn('No fields and no formStructure for document type:', documentType)
       }
     }
     
-    console.log('Final selected bon type:', bonType)
-    console.log('Form structure fields:', bonType?.formStructure?.fields)
+    console.log('Final selected document type:', documentType)
+    console.log('Form structure fields:', documentType?.formStructure?.fields)
     
-    // Charger les groupes de champs (depuis bonType.fieldGroups si disponibles, sinon depuis l'API)
+    // Charger les groupes de champs (depuis documentType.fieldGroups si disponibles, sinon depuis l'API)
     // et initialiser formData avec une ligne par défaut pour chaque groupe répétable
     const initializeGroups = async () => {
-      if (!bonType) return
+      if (!documentType) return
       
-      let groupsToUse: BonFieldGroup[] = []
+      let groupsToUse: DocumentFieldGroup[] = []
       
-      if (bonType.fieldGroups && bonType.fieldGroups.length > 0) {
+      if (documentType.fieldGroups && documentType.fieldGroups.length > 0) {
         // Trier par ordre
-        groupsToUse = [...bonType.fieldGroups].sort((a, b) => a.order - b.order)
+        groupsToUse = [...documentType.fieldGroups].sort((a, b) => a.order - b.order)
         setFieldGroups(groupsToUse)
       } else {
         // Charger depuis l'API
         try {
-          const groups = await api.getBonFieldGroups(bonType.id.toString())
+          const groups = await api.getDocumentFieldGroups(documentType.id.toString())
           // Trier par ordre
           groupsToUse = groups.sort((a, b) => a.order - b.order)
           setFieldGroups(groupsToUse)
@@ -199,7 +228,7 @@ export default function CreateVoucherPage() {
     }
     
     initializeGroups()
-    setSelectedBonType(bonType || null)
+    setSelectedDocumentType(documentType || null)
     setErrors({})
   }
 
@@ -297,13 +326,13 @@ export default function CreateVoucherPage() {
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {}
     
-    if (!selectedBonType) {
-      newErrors.bonTypeId = 'Veuillez sélectionner un type de bon'
+    if (!selectedDocumentType) {
+      newErrors.documentTypeId = 'Veuillez sélectionner un type de document'
     }
 
     // Valider les champs simples requis
-    if (selectedBonType?.formStructure?.fields) {
-      selectedBonType.formStructure.fields.forEach((field: any) => {
+    if (selectedDocumentType?.formStructure?.fields) {
+      selectedDocumentType.formStructure.fields.forEach((field: any) => {
         if (field.required) {
           const value = formData[field.name]
           // Pour les checkboxes, vérifier si c'est false (non coché)
@@ -346,6 +375,15 @@ export default function CreateVoucherPage() {
                 if (value !== true && value !== 'true' && value !== 1) {
                   newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
                 }
+              } else if (field.type === 'document_link') {
+                if (!value || typeof value !== 'object' || !value.documentNumber || !value.documentTypeId) {
+                  newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
+                } else {
+                  const fieldKey = `${group.name}_${rowIndex}_${field.name}`
+                  if (!foundDocuments[fieldKey]) {
+                    newErrors[`${group.name}[${rowIndex}].${field.name}`] = `Le document ${value.documentNumber} n'a pas été trouvé (ligne ${rowIndex + 1})`
+                  }
+                }
               } else {
                 if (!value || (typeof value === 'string' && value.trim() === '')) {
                   newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
@@ -363,6 +401,15 @@ export default function CreateVoucherPage() {
             if (field.type === 'checkbox') {
               if (value !== true && value !== 'true' && value !== 1) {
                 newErrors[`${group.name}.${field.name}`] = `${field.label} est requis`
+              }
+            } else if (field.type === 'document_link') {
+              if (!value || typeof value !== 'object' || !value.documentNumber || !value.documentTypeId) {
+                newErrors[`${group.name}.${field.name}`] = `${field.label} est requis`
+              } else {
+                const fieldKey = `${group.name}_${field.name}`
+                if (!foundDocuments[fieldKey]) {
+                  newErrors[`${group.name}.${field.name}`] = `Le document ${value.documentNumber} n'a pas été trouvé`
+                }
               }
             } else {
               if (!value || (typeof value === 'string' && value.trim() === '')) {
@@ -385,7 +432,7 @@ export default function CreateVoucherPage() {
       return
     }
 
-    if (!selectedBonType) {
+    if (!selectedDocumentType) {
       return
     }
 
@@ -428,20 +475,41 @@ export default function CreateVoucherPage() {
       
       console.log('Final values to save:', JSON.stringify(values, null, 2))
       
-      const bonData = {
-        bonTypeId: selectedBonType.id.toString(),
+      const documentData = {
+        documentTypeId: selectedDocumentType.id.toString(),
         siteId: siteId || undefined,
         siteName: siteName || undefined,
         values: values,
+        signers: signers.length > 0 ? signers.map(s => ({
+          userId: s.userId,
+          order: s.order,
+        })) : undefined,
       }
 
-      const createdBon = await api.createBon(bonData)
+      const createdDocument = await api.createDocument(documentData)
       
-      // Rediriger vers la page de détails du bon créé
-      router.push(`/dashboard/vouchers/${createdBon.id}`)
+      toast({
+        title: 'Succès',
+        description: signers.length > 0 
+          ? `Document créé avec ${signers.length} signataire(s). Le premier signataire sera notifié.`
+          : 'Document créé avec succès',
+      })
+      
+      // Nettoyer complètement le formulaire avant la redirection
+      // pour éviter que l'utilisateur puisse resoumettre en cas de redirection lente
+      setFormData({})
+      setErrors({})
+      setSigners([])
+      setFoundDocuments({})
+      setSearchingDocuments({})
+      setSelectedDocumentType(null)
+      setFieldGroups([])
+      
+      // Rediriger vers la page de détails du document créé
+      router.push(`/dashboard/vouchers/${createdDocument.id}`)
     } catch (error: any) {
-      console.error('Error creating bon:', error)
-      alert(error.message || 'Erreur lors de la création du bon')
+      console.error('Error creating document:', error)
+      alert(error.message || 'Erreur lors de la création du document')
     } finally {
       setSaving(false)
     }
@@ -873,6 +941,168 @@ export default function CreateVoucherPage() {
           </div>
         )
 
+      case 'document_link':
+        // Parser les options du champ document_link
+        let linkOptions: any = {}
+        if (field.options) {
+          if (typeof field.options === 'string') {
+            try {
+              linkOptions = JSON.parse(field.options)
+            } catch (e) {
+              console.error('Error parsing document_link options:', e)
+            }
+          } else {
+            linkOptions = field.options
+          }
+        }
+
+        const linkValue = value && typeof value === 'object' ? value : { documentNumber: '', documentTypeId: linkOptions.targetDocumentTypeId || '', linkType: linkOptions.linkType || 'reference' }
+        const targetDocumentTypeId = linkOptions.targetDocumentTypeId
+        const allowedDocumentTypes = targetDocumentTypeId 
+          ? documentTypes.filter(dt => dt.id === targetDocumentTypeId)
+          : documentTypes.filter(dt => dt.id !== selectedDocumentType?.id)
+
+        const handleDocumentLinkChangeGroup = async (documentNumber: string) => {
+          const newValue = {
+            ...linkValue,
+            documentNumber,
+            documentTypeId: linkValue.documentTypeId || targetDocumentTypeId || '',
+          }
+          onChange(newValue)
+
+          // Rechercher le document si un numéro est fourni
+          if (documentNumber && documentNumber.trim()) {
+            setSearchingDocuments(prev => ({ ...prev, [fieldId || field.name]: true }))
+            try {
+              for (const docType of allowedDocumentTypes) {
+                try {
+                  const documents = await api.getDocuments({ 
+                    documentTypeId: docType.id,
+                    limit: 100 
+                  })
+                  const found = documents.data.find((doc: any) => 
+                    doc.documentNumber === documentNumber.trim()
+                  )
+                  if (found) {
+                    setFoundDocuments(prev => ({
+                      ...prev,
+                      [fieldId || field.name]: { ...found, documentType: docType }
+                    }))
+                    onChange({
+                      documentNumber: found.documentNumber,
+                      documentTypeId: found.documentTypeId,
+                      linkType: linkValue.linkType || linkOptions.linkType || 'reference',
+                    })
+                    setSearchingDocuments(prev => ({ ...prev, [fieldId || field.name]: false }))
+                    return
+                  }
+                } catch (e) {
+                  console.error('Error searching document:', e)
+                }
+              }
+              setFoundDocuments(prev => {
+                const newState = { ...prev }
+                delete newState[fieldId || field.name]
+                return newState
+              })
+            } catch (error) {
+              console.error('Error searching document:', error)
+            } finally {
+              setSearchingDocuments(prev => ({ ...prev, [fieldId || field.name]: false }))
+            }
+          } else {
+            setFoundDocuments(prev => {
+              const newState = { ...prev }
+              delete newState[fieldId || field.name]
+              return newState
+            })
+          }
+        }
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={fieldId || field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
+              {!targetDocumentTypeId && allowedDocumentTypes.length > 1 && (
+                <div className="space-y-2">
+                  <Label htmlFor={`${fieldId || field.name}_type`}>Type de document cible</Label>
+                  <Select
+                    value={linkValue.documentTypeId || 'none'}
+                    onValueChange={(val) => {
+                      onChange({
+                        ...linkValue,
+                        documentTypeId: val === 'none' ? '' : val,
+                        documentNumber: '',
+                      })
+                      setFoundDocuments(prev => {
+                        const newState = { ...prev }
+                        delete newState[fieldId || field.name]
+                        return newState
+                      })
+                    }}
+                  >
+                    <SelectTrigger id={`${fieldId || field.name}_type`}>
+                      <SelectValue placeholder="Sélectionner un type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sélectionner un type</SelectItem>
+                      {allowedDocumentTypes.map((dt) => (
+                        <SelectItem key={dt.id} value={dt.id}>
+                          {dt.name} ({dt.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <Label htmlFor={`${fieldId || field.name}_number`}>
+                  Numéro de document {!targetDocumentTypeId && linkValue.documentTypeId && `(${allowedDocumentTypes.find(dt => dt.id === linkValue.documentTypeId)?.code || ''})`}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id={`${fieldId || field.name}_number`}
+                    value={linkValue.documentNumber || ''}
+                    onChange={(e) => handleDocumentLinkChangeGroup(e.target.value)}
+                    placeholder="Ex: AUT-000001"
+                    className={fieldError ? 'border-destructive flex-1' : 'flex-1'}
+                    disabled={!targetDocumentTypeId && !linkValue.documentTypeId}
+                  />
+                  {searchingDocuments[fieldId || field.name] && (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground self-center" />
+                  )}
+                </div>
+                {foundDocuments[fieldId || field.name] && (
+                  <div className="p-2 bg-green-500/10 border border-green-500/20 rounded text-sm">
+                    <p className="text-green-600 font-medium">
+                      ✓ Document trouvé : {foundDocuments[fieldId || field.name].documentNumber}
+                    </p>
+                    <p className="text-green-600/80 text-xs mt-1">
+                      Type: {foundDocuments[fieldId || field.name].documentType?.name || 'N/A'} | 
+                      Statut: {foundDocuments[fieldId || field.name].status}
+                    </p>
+                  </div>
+                )}
+                {linkValue.documentNumber && !foundDocuments[fieldId || field.name] && !searchingDocuments[fieldId || field.name] && (
+                  <div className="p-2 bg-yellow-500/10 border border-yellow-500/20 rounded text-sm text-yellow-600">
+                    ⚠ Document non trouvé. Vérifiez le numéro.
+                  </div>
+                )}
+              </div>
+            </div>
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
       default:
         return (
           <div key={field.name} className="space-y-2">
@@ -899,7 +1129,7 @@ export default function CreateVoucherPage() {
   }
 
   // Rendre un groupe répétable (tableau)
-  const renderRepeatableGroup = (group: BonFieldGroup) => {
+  const renderRepeatableGroup = (group: DocumentFieldGroup) => {
     const groupData = formData[group.name] || []
     const groupError = errors[`${group.name}_count`]
 
@@ -1001,7 +1231,7 @@ export default function CreateVoucherPage() {
   }
 
   // Rendre un groupe simple (non répétable)
-  const renderSimpleGroup = (group: BonFieldGroup) => {
+  const renderSimpleGroup = (group: DocumentFieldGroup) => {
     const groupData = formData[group.name] || {}
 
     return (
@@ -1063,9 +1293,9 @@ export default function CreateVoucherPage() {
             </Button>
           </Link>
           <div className="flex-1">
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Créer un bon</h1>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Créer un document</h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              Remplissez le formulaire pour créer un nouveau bon
+              Remplissez le formulaire pour créer un nouveau document
             </p>
           </div>
         </div>
@@ -1075,39 +1305,39 @@ export default function CreateVoucherPage() {
             <CardHeader>
               <CardTitle className="text-lg md:text-xl">Informations générales</CardTitle>
               <CardDescription className="text-sm">
-                Sélectionnez le type de bon et renseignez les informations de base
+                Sélectionnez le type de document et renseignez les informations de base
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Type de bon */}
+              {/* Type de document */}
               <div className="space-y-2">
-                <Label htmlFor="bonTypeId">
-                  Type de bon <span className="text-destructive">*</span>
+                <Label htmlFor="documentTypeId">
+                  Type de document <span className="text-destructive">*</span>
                 </Label>
                 <Select
-                  value={selectedBonType?.id.toString() || ''}
-                  onValueChange={handleBonTypeChange}
+                  value={selectedDocumentType?.id.toString() || ''}
+                  onValueChange={handleDocumentTypeChange}
                 >
-                  <SelectTrigger className={errors.bonTypeId ? 'border-destructive' : ''}>
-                    <SelectValue placeholder="Sélectionnez un type de bon" />
+                  <SelectTrigger className={errors.documentTypeId ? 'border-destructive' : ''}>
+                    <SelectValue placeholder="Sélectionnez un type de document" />
                   </SelectTrigger>
                   <SelectContent>
-                    {bonTypes.map((type) => (
+                    {documentTypes.map((type) => (
                       <SelectItem key={type.id} value={type.id.toString()}>
                         {type.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.bonTypeId && (
+                {errors.documentTypeId && (
                   <p className="text-sm text-destructive flex items-center gap-1">
                     <AlertCircle className="h-3 w-3" />
-                    {errors.bonTypeId}
+                    {errors.documentTypeId}
                   </p>
                 )}
-                {selectedBonType?.description && (
+                {selectedDocumentType?.description && (
                   <p className="text-sm text-muted-foreground mt-2">
-                    {selectedBonType.description}
+                    {selectedDocumentType.description}
                   </p>
                 )}
               </div>
@@ -1136,21 +1366,21 @@ export default function CreateVoucherPage() {
             </CardContent>
           </Card>
 
-          {/* Formulaire dynamique basé sur le type de bon */}
-          {selectedBonType && (
+          {/* Formulaire dynamique basé sur le type de document */}
+          {selectedDocumentType && (
             <>
               {/* Champs simples (sans groupe) */}
-              {selectedBonType.formStructure?.fields && selectedBonType.formStructure.fields.length > 0 && (
+              {selectedDocumentType.formStructure?.fields && selectedDocumentType.formStructure.fields.length > 0 && (
                 <Card className="border-border/50 mt-6">
                   <CardHeader>
-                    <CardTitle className="text-lg md:text-xl">Détails du bon</CardTitle>
+                    <CardTitle className="text-lg md:text-xl">Détails du document</CardTitle>
                     <CardDescription className="text-sm">
-                      Remplissez les champs spécifiques à ce type de bon
+                      Remplissez les champs spécifiques à ce type de document
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {selectedBonType.formStructure.fields.map((field: any) => renderField(field))}
+                      {selectedDocumentType.formStructure.fields.map((field: any) => renderField(field))}
                     </div>
                   </CardContent>
                 </Card>
@@ -1170,19 +1400,187 @@ export default function CreateVoucherPage() {
               )}
 
               {/* Message si aucun champ ni groupe n'est disponible */}
-              {selectedBonType && 
-               (!selectedBonType.formStructure?.fields || selectedBonType.formStructure.fields.length === 0) && 
+              {selectedDocumentType && 
+               (!selectedDocumentType.formStructure?.fields || selectedDocumentType.formStructure.fields.length === 0) && 
                fieldGroups.length === 0 && (
                 <Card className="border-border/50 mt-6">
                   <CardContent className="pt-6">
                     <p className="text-sm text-muted-foreground text-center">
-                      Aucun champ configuré pour ce type de bon. Veuillez configurer les champs dans les paramètres du type de bon.
+                      Aucun champ configuré pour ce type de document. Veuillez configurer les champs dans les paramètres du type de document.
                     </p>
                   </CardContent>
                 </Card>
               )}
             </>
           )}
+
+          {/* Section Signataires */}
+          <Card className="border-border/50 mt-6">
+            <CardHeader>
+              <CardTitle className="text-lg md:text-xl">Signataires</CardTitle>
+              <CardDescription className="text-sm">
+                Ajoutez les utilisateurs qui doivent signer ce document dans l'ordre souhaité. Le premier signataire sera notifié dès la création du document.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Sélection d'utilisateur */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Label htmlFor="signer-select">Ajouter un signataire</Label>
+                  <Select value={selectedUserId} onValueChange={setSelectedUserId}>
+                    <SelectTrigger id="signer-select">
+                      <SelectValue placeholder="Sélectionner un utilisateur" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {loadingUsers ? (
+                        <SelectItem value="__loading__" disabled>Chargement...</SelectItem>
+                      ) : availableUsers.filter(u => !signers.some(s => s.userId === u.id)).length === 0 ? (
+                        <SelectItem value="__no_users__" disabled>Aucun utilisateur disponible</SelectItem>
+                      ) : (
+                        availableUsers
+                          .filter(u => !signers.some(s => s.userId === u.id))
+                          .map(user => (
+                            <SelectItem key={user.id} value={user.id}>
+                              {user.fullName} ({user.email}) - {user.role}
+                            </SelectItem>
+                          ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedUserId || selectedUserId === '__loading__' || selectedUserId === '__no_users__') {
+                      toast({
+                        title: 'Erreur',
+                        description: 'Veuillez sélectionner un utilisateur',
+                        variant: 'destructive',
+                      })
+                      return
+                    }
+
+                    const user = availableUsers.find(u => u.id === selectedUserId)
+                    if (!user) return
+
+                    if (signers.some(s => s.userId === selectedUserId)) {
+                      toast({
+                        title: 'Attention',
+                        description: 'Cet utilisateur est déjà dans la liste des signataires',
+                        variant: 'destructive',
+                      })
+                      return
+                    }
+
+                    const newOrder = signers.length > 0 ? Math.max(...signers.map(s => s.order)) + 1 : 1
+                    setSigners([...signers, {
+                      userId: selectedUserId,
+                      order: newOrder,
+                      user,
+                    }])
+                    setSelectedUserId('')
+                  }}
+                  disabled={!selectedUserId || selectedUserId === '__loading__' || selectedUserId === '__no_users__' || loadingUsers}
+                  className="mt-auto"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Ajouter
+                </Button>
+              </div>
+
+              {/* Liste des signataires */}
+              {signers.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Ordre de signature</Label>
+                  <div className="space-y-2 border rounded-lg p-4">
+                    {signers
+                      .sort((a, b) => a.order - b.order)
+                      .map((signer, index) => (
+                        <div
+                          key={signer.userId}
+                          className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg"
+                        >
+                          <div className="flex items-center gap-2 flex-1">
+                            <Badge variant="outline" className="min-w-[2rem] justify-center">
+                              {signer.order}
+                            </Badge>
+                            <div className="flex-1">
+                              <p className="font-medium">{signer.user?.fullName || 'N/A'}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {signer.user?.email} - {signer.user?.role}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                const newSigners = [...signers]
+                                const targetIndex = index - 1
+                                if (targetIndex < 0) return
+                                const temp = newSigners[index].order
+                                newSigners[index].order = newSigners[targetIndex].order
+                                newSigners[targetIndex].order = temp
+                                newSigners.sort((a, b) => a.order - b.order)
+                                setSigners(newSigners)
+                              }}
+                              disabled={index === 0}
+                              className="h-8 w-8"
+                            >
+                              <GripVertical className="h-4 w-4 rotate-90" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                const newSigners = [...signers]
+                                const targetIndex = index + 1
+                                if (targetIndex >= newSigners.length) return
+                                const temp = newSigners[index].order
+                                newSigners[index].order = newSigners[targetIndex].order
+                                newSigners[targetIndex].order = temp
+                                newSigners.sort((a, b) => a.order - b.order)
+                                setSigners(newSigners)
+                              }}
+                              disabled={index === signers.length - 1}
+                              className="h-8 w-8"
+                            >
+                              <GripVertical className="h-4 w-4 -rotate-90" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setSigners(signers.filter(s => s.userId !== signer.userId).map((s, idx) => ({
+                                  ...s,
+                                  order: idx + 1,
+                                })))
+                              }}
+                              className="h-8 w-8 text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Les signataires signeront dans l'ordre affiché (de haut en bas). Le premier signataire sera notifié dès la création du document.
+                  </p>
+                </div>
+              )}
+
+              {signers.length === 0 && (
+                <div className="text-center py-4 text-muted-foreground text-sm">
+                  Aucun signataire ajouté. Vous pourrez ajouter des signataires plus tard depuis la page de détails du document.
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row justify-end gap-4 mt-6">
@@ -1200,7 +1598,7 @@ export default function CreateVoucherPage() {
               ) : (
                 <>
                   <Save className="mr-2 h-4 w-4" />
-                  Créer le bon
+                  Créer le document
                 </>
               )}
             </Button>

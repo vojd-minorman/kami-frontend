@@ -14,7 +14,7 @@ import { useAuth } from '@/hooks/use-auth'
 import { api } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 
-export default function CreateBonTypePage() {
+export default function CreateCategoryPage() {
   const router = useRouter()
   const { user } = useAuth()
   
@@ -23,6 +23,7 @@ export default function CreateBonTypePage() {
     name: '',
     code: '',
     description: '',
+    color: '#3B82F6', // Couleur par défaut (bleu)
     status: 'active' as 'active' | 'inactive',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -51,6 +52,11 @@ export default function CreateBonTypePage() {
       newErrors.code = 'Le code doit contenir uniquement des majuscules, chiffres, tirets et underscores'
     }
 
+    // Valider le format de la couleur (hex)
+    if (formData.color && !/^#[0-9A-Fa-f]{6}$/.test(formData.color)) {
+      newErrors.color = 'La couleur doit être au format hexadécimal (ex: #3B82F6)'
+    }
+
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
@@ -65,21 +71,21 @@ export default function CreateBonTypePage() {
     try {
       setSaving(true)
       
-      const bonTypeData = {
+      const categoryData = {
         name: formData.name.trim(),
         code: formData.code.trim().toUpperCase(),
         description: formData.description.trim() || null,
+        color: formData.color || null,
         status: formData.status,
-        formStructure: JSON.stringify({ fields: [] }), // Structure vide par défaut
       }
 
-      const createdBonType = await api.createBonType(bonTypeData)
+      const createdCategory = await api.createCategory(categoryData)
       
       // Rediriger vers la page de liste
-      router.push('/dashboard/bon-types')
+      router.push('/dashboard/categories')
     } catch (error: any) {
-      console.error('Error creating bon type:', error)
-      alert(error.message || 'Erreur lors de la création du type de bon')
+      console.error('Error creating category:', error)
+      alert(error.message || 'Erreur lors de la création de la catégorie')
     } finally {
       setSaving(false)
     }
@@ -90,15 +96,15 @@ export default function CreateBonTypePage() {
       <div className="space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-          <Link href="/dashboard/bon-types">
+          <Link href="/dashboard/categories">
             <Button variant="ghost" size="icon" className="h-10 w-10">
               <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
           <div className="flex-1">
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Créer un type de bon</h1>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Créer une catégorie</h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              Remplissez le formulaire pour créer un nouveau type de bon
+              Remplissez le formulaire pour créer une nouvelle catégorie de documents
             </p>
           </div>
         </div>
@@ -108,7 +114,7 @@ export default function CreateBonTypePage() {
             <CardHeader>
               <CardTitle className="text-lg md:text-xl">Informations générales</CardTitle>
               <CardDescription className="text-sm">
-                Définissez les informations de base du type de bon
+                Définissez les informations de base de la catégorie
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -120,7 +126,7 @@ export default function CreateBonTypePage() {
                   id="name"
                   value={formData.name}
                   onChange={(e) => handleChange('name', e.target.value)}
-                  placeholder="Ex: Bon de livraison"
+                  placeholder="Ex: Autorisation, Entrée/Sortie, Livraison..."
                   className={errors.name ? 'border-destructive' : ''}
                 />
                 {errors.name && (
@@ -139,7 +145,7 @@ export default function CreateBonTypePage() {
                   id="code"
                   value={formData.code}
                   onChange={(e) => handleChange('code', e.target.value.toUpperCase())}
-                  placeholder="Ex: BDL"
+                  placeholder="Ex: AUT, ES, LIV..."
                   className={errors.code ? 'border-destructive' : ''}
                   maxLength={20}
                 />
@@ -150,7 +156,7 @@ export default function CreateBonTypePage() {
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Le code sera utilisé pour générer les numéros de bons (ex: BDL-000001)
+                  Le code doit être unique et sera utilisé pour identifier la catégorie
                 </p>
               </div>
 
@@ -160,9 +166,39 @@ export default function CreateBonTypePage() {
                   id="description"
                   value={formData.description}
                   onChange={(e) => handleChange('description', e.target.value)}
-                  placeholder="Description du type de bon..."
+                  placeholder="Description de la catégorie..."
                   rows={4}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="color">Couleur</Label>
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="color"
+                    type="color"
+                    value={formData.color}
+                    onChange={(e) => handleChange('color', e.target.value)}
+                    className="h-12 w-24 cursor-pointer"
+                  />
+                  <Input
+                    type="text"
+                    value={formData.color}
+                    onChange={(e) => handleChange('color', e.target.value)}
+                    placeholder="#3B82F6"
+                    className={errors.color ? 'border-destructive flex-1' : 'flex-1'}
+                    maxLength={7}
+                  />
+                </div>
+                {errors.color && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {errors.color}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  La couleur sera utilisée pour l'affichage des badges et l'organisation visuelle
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -182,7 +218,7 @@ export default function CreateBonTypePage() {
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row justify-end gap-4 mt-6">
-            <Link href="/dashboard/bon-types">
+            <Link href="/dashboard/categories">
               <Button type="button" variant="outline" className="w-full sm:w-auto">
                 Annuler
               </Button>
@@ -196,7 +232,7 @@ export default function CreateBonTypePage() {
               ) : (
                 <>
                   <Save className="mr-2 h-4 w-4" />
-                  Créer le type de bon
+                  Créer la catégorie
                 </>
               )}
             </Button>
@@ -206,10 +242,3 @@ export default function CreateBonTypePage() {
     </DashboardShell>
   )
 }
-
-
-
-
-
-
-

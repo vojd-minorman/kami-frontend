@@ -26,46 +26,47 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Plus, Eye, Download, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type Bon, type BonType } from '@/lib/api'
+import { PermissionGuard } from '@/components/permission-guard'
+import { api, type Document, type DocumentType } from '@/lib/api'
 
 export default function VouchersPage() {
   const router = useRouter()
   const { t } = useLocale()
   const { user } = useAuth()
-  const [bons, setBons] = useState<Bon[]>([])
-  const [bonTypes, setBonTypes] = useState<BonType[]>([])
+  const [documents, setDocuments] = useState<Document[]>([])
+  const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [bonTypeFilter, setBonTypeFilter] = useState<string>('all')
+  const [documentTypeFilter, setDocumentTypeFilter] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const limit = 10
 
   useEffect(() => {
     if (user) {
-      loadBonTypes()
+      loadDocumentTypes()
     }
   }, [user])
 
   useEffect(() => {
     if (user) {
-      loadBons()
+      loadDocuments()
     }
-  }, [user, currentPage, statusFilter, bonTypeFilter])
+  }, [user, currentPage, statusFilter, documentTypeFilter])
 
-  const loadBonTypes = async () => {
+  const loadDocumentTypes = async () => {
     try {
-      const types = await api.getBonTypes()
-      setBonTypes(types)
+      const types = await api.getDocumentTypes()
+      setDocumentTypes(types)
     } catch (error) {
-      console.error('Error loading bon types:', error)
+      console.error('Error loading document types:', error)
     }
   }
 
-  const loadBons = async () => {
+  const loadDocuments = async () => {
     try {
       setLoading(true)
       const params: any = {
@@ -77,36 +78,47 @@ export default function VouchersPage() {
         params.status = statusFilter
       }
       
-      if (bonTypeFilter !== 'all') {
-        params.bonTypeId = bonTypeFilter // Déjà une string, pas besoin de Number()
+      if (documentTypeFilter !== 'all') {
+        params.documentTypeId = documentTypeFilter // Déjà une string, pas besoin de Number()
       }
 
-      const response = await api.getBons(params)
-      setBons(response.data)
+      const response = await api.getDocuments(params)
+      setDocuments(response.data)
       setTotal(response.meta.total)
       setTotalPages(response.meta.lastPage)
     } catch (error) {
-      console.error('Error loading bons:', error)
+      console.error('Error loading documents:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDownloadPDF = async (bonId: string | number) => {
+  const handleDownloadPDF = async (documentId: string | number) => {
     try {
       setSaving(true)
-      const blob = await api.downloadBonPDF(bonId)
+      const blob = await api.downloadDocumentPDF(documentId)
+      
+      // Vérifier que le blob n'est pas vide
+      if (!blob || blob.size === 0) {
+        throw new Error('Le fichier PDF est vide')
+      }
+      
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `bon-${bonId}.pdf`
+      a.download = `document-${documentId}.pdf`
       document.body.appendChild(a)
       a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-    } catch (error) {
+      
+      // Nettoyer après un court délai pour s'assurer que le téléchargement a commencé
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      }, 100)
+    } catch (error: any) {
       console.error('Error downloading PDF:', error)
-      alert('Erreur lors du téléchargement du PDF')
+      const errorMessage = error?.message || 'Erreur lors du téléchargement du PDF'
+      alert(errorMessage)
     } finally {
       setSaving(false)
     }
@@ -125,25 +137,26 @@ export default function VouchersPage() {
   }
 
   // Recherche côté client pour l'instant (peut être améliorée avec recherche serveur)
-  const filteredBons = searchQuery
-    ? bons.filter(bon => {
+  const filteredDocuments = searchQuery
+    ? documents.filter(document => {
         const query = searchQuery.toLowerCase()
         return (
-          bon.bonNumber?.toLowerCase().includes(query) ||
-          bon.siteName?.toLowerCase().includes(query) ||
-          bon.bonType?.name?.toLowerCase().includes(query)
+          document.documentNumber?.toLowerCase().includes(query) ||
+          document.siteName?.toLowerCase().includes(query) ||
+          document.documentType?.name?.toLowerCase().includes(query)
         )
       })
-    : bons
+    : documents
 
   return (
-    <div className="space-y-4 md:space-y-6">
+    <PermissionGuard permission="document.read">
+      <div className="space-y-4 md:space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{t.nav.bons}</h1>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{t.nav.documents || 'Documents'}</h1>
           <p className="text-muted-foreground text-sm md:text-base mt-1">
-            Gérez vos bons numériques
+            Gérez vos documents numériques
           </p>
         </div>
         <Button 
@@ -151,7 +164,7 @@ export default function VouchersPage() {
           onClick={() => router.push('/dashboard/vouchers/create')}
         >
           <Plus className="mr-2 h-4 w-4" />
-          Créer un bon
+          Créer un document
         </Button>
       </div>
 
@@ -170,7 +183,7 @@ export default function VouchersPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Rechercher un bon..."
+                  placeholder="Rechercher un document..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9"
@@ -194,14 +207,14 @@ export default function VouchersPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Type de bon</label>
-              <Select value={bonTypeFilter} onValueChange={setBonTypeFilter}>
+              <label className="text-sm font-medium">Type de document</label>
+              <Select value={documentTypeFilter} onValueChange={setDocumentTypeFilter}>
                 <SelectTrigger>
                   <SelectValue placeholder="Tous les types" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tous les types</SelectItem>
-                  {bonTypes.map((type) => (
+                  {documentTypes.map((type) => (
                     <SelectItem key={type.id} value={type.id.toString()}>
                       {type.name}
                     </SelectItem>
@@ -215,7 +228,7 @@ export default function VouchersPage() {
                 className="w-full"
                 onClick={() => {
                   setStatusFilter('all')
-                  setBonTypeFilter('all')
+                  setDocumentTypeFilter('all')
                   setSearchQuery('')
                 }}
               >
@@ -226,12 +239,12 @@ export default function VouchersPage() {
         </CardContent>
       </Card>
 
-      {/* Bons List */}
+      {/* Documents List */}
       <Card className="border-border/50">
         <CardHeader>
-          <CardTitle className="text-lg md:text-xl">Liste des bons</CardTitle>
+          <CardTitle className="text-lg md:text-xl">Liste des documents</CardTitle>
           <CardDescription className="text-sm">
-            {total > 0 ? `${total} bon(s) trouvé(s)` : 'Aucun bon'}
+            {total > 0 ? `${total} document(s) trouvé(s)` : 'Aucun document'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -244,20 +257,20 @@ export default function VouchersPage() {
                 </div>
               ))}
             </div>
-          ) : filteredBons.length === 0 ? (
+          ) : filteredDocuments.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground mb-4">
-                {searchQuery || statusFilter !== 'all' || bonTypeFilter !== 'all'
-                  ? 'Aucun bon ne correspond à vos critères de recherche'
-                  : 'Aucun bon trouvé'}
+                {searchQuery || statusFilter !== 'all' || documentTypeFilter !== 'all'
+                  ? 'Aucun document ne correspond à vos critères de recherche'
+                  : 'Aucun document trouvé'}
               </p>
-              {(searchQuery || statusFilter !== 'all' || bonTypeFilter !== 'all') && (
+              {(searchQuery || statusFilter !== 'all' || documentTypeFilter !== 'all') && (
                 <Button
                   variant="outline"
                   onClick={() => {
                     setSearchQuery('')
                     setStatusFilter('all')
-                    setBonTypeFilter('all')
+                    setDocumentTypeFilter('all')
                     setCurrentPage(1)
                   }}
                 >
@@ -272,7 +285,7 @@ export default function VouchersPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[120px]">Numéro</TableHead>
-                      <TableHead className="min-w-[150px]">Type de bon</TableHead>
+                      <TableHead className="min-w-[150px]">Type de document</TableHead>
                       <TableHead className="min-w-[100px]">Site</TableHead>
                       <TableHead className="min-w-[100px]">Statut</TableHead>
                       <TableHead className="min-w-[120px]">Date de création</TableHead>
@@ -280,21 +293,21 @@ export default function VouchersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredBons.map((bon) => (
-                      <TableRow key={bon.id}>
+                    {filteredDocuments.map((document) => (
+                      <TableRow key={document.id}>
                         <TableCell className="font-medium font-mono text-sm">
-                          {bon.bonNumber || `#${bon.id}`}
+                          {document.documentNumber || `#${document.id}`}
                         </TableCell>
                         <TableCell>
-                          <span className="font-medium">{bon.bonType?.name || 'N/A'}</span>
+                          <span className="font-medium">{document.documentType?.name || 'N/A'}</span>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {bon.siteName || bon.siteId || 'N/A'}
+                          {document.siteName || document.siteId || 'N/A'}
                         </TableCell>
-                        <TableCell>{getStatusBadge(bon.status)}</TableCell>
+                        <TableCell>{getStatusBadge(document.status)}</TableCell>
                         <TableCell className="text-sm">
-                          {bon.createdAt
-                            ? new Date(bon.createdAt).toLocaleDateString('fr-FR', {
+                          {document.createdAt
+                            ? new Date(document.createdAt).toLocaleDateString('fr-FR', {
                                 day: 'numeric',
                                 month: 'short',
                                 year: 'numeric',
@@ -307,7 +320,7 @@ export default function VouchersPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => router.push(`/dashboard/vouchers/${bon.id}`)}
+                              onClick={() => router.push(`/dashboard/vouchers/${document.id}`)}
                               title="Voir les détails"
                             >
                               <Eye className="h-4 w-4" />
@@ -316,7 +329,7 @@ export default function VouchersPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => handleDownloadPDF(bon.id)}
+                              onClick={() => handleDownloadPDF(document.id)}
                               disabled={saving}
                               title="Télécharger le PDF"
                             >
@@ -334,7 +347,7 @@ export default function VouchersPage() {
               {totalPages > 1 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 pt-4 border-t">
                   <div className="text-sm text-muted-foreground">
-                    Page {currentPage} sur {totalPages} • {total} bon(s) au total
+                    Page {currentPage} sur {totalPages} • {total} document(s) au total
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -362,7 +375,8 @@ export default function VouchersPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </PermissionGuard>
   )
 }
 

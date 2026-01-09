@@ -5,6 +5,7 @@ import { useLocale } from '@/contexts/locale-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -31,6 +32,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
+import { Checkbox } from '@/components/ui/checkbox'
 import { 
   Users, 
   User as UserIcon, 
@@ -45,16 +47,31 @@ import {
   Filter,
   CheckCircle2,
   XCircle,
+  Key,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
+import { usePermissions } from '@/hooks/use-permissions'
 import { api, type User } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
+
+interface Role {
+  id: string
+  name: string
+  code: string
+  description?: string
+  isSystem?: boolean
+  isActive?: boolean
+  permissions?: any[]
+}
 
 export default function UsersPage() {
   const { t } = useLocale()
   const { user: currentUser, loading: authLoading } = useAuth()
+  const { hasPermission } = usePermissions()
   const [users, setUsers] = useState<User[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingRoles, setLoadingRoles] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
@@ -63,11 +80,24 @@ export default function UsersPage() {
   const [limit] = useState(10)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isRolesDialogOpen, setIsRolesDialogOpen] = useState(false)
   const [processing, setProcessing] = useState(false)
+  
+  // Form states
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    fullName: '',
+    role: 'user',
+    roleIds: [] as string[],
+  })
+  const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([])
 
   useEffect(() => {
     if (currentUser) {
       loadUsers()
+      loadRoles()
     }
   }, [currentUser, currentPage, roleFilter])
 
@@ -95,6 +125,18 @@ export default function UsersPage() {
       console.error('Error loading users:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadRoles = async () => {
+    try {
+      setLoadingRoles(true)
+      const rolesData = await api.getRoles()
+      setRoles(rolesData)
+    } catch (error) {
+      console.error('Error loading roles:', error)
+    } finally {
+      setLoadingRoles(false)
     }
   }
 
@@ -126,7 +168,109 @@ export default function UsersPage() {
 
   const handleEdit = (user: User) => {
     setEditingUser(user)
+    setFormData({
+      email: user.email,
+      password: '',
+      fullName: user.fullName || '',
+      role: user.role,
+      roleIds: user.roles?.map(r => r.id) || [],
+    })
+    setSelectedRoleIds(user.roles?.map(r => r.id) || [])
     setIsEditDialogOpen(true)
+  }
+
+  const handleCreate = () => {
+    setFormData({
+      email: '',
+      password: '',
+      fullName: '',
+      role: 'user',
+      roleIds: [],
+    })
+    setSelectedRoleIds([])
+    setIsCreateDialogOpen(true)
+  }
+
+  const handleSaveUser = async () => {
+    try {
+      setProcessing(true)
+      
+      if (editingUser) {
+        // Mise à jour
+        const updateData: any = {
+          fullName: formData.fullName,
+          email: formData.email,
+          role: formData.role,
+          isActive: editingUser.isActive,
+        }
+        
+        // Ajouter le mot de passe seulement s'il est fourni
+        if (formData.password) {
+          updateData.password = formData.password
+        }
+        
+        await api.updateUser(editingUser.id, updateData)
+        
+        // Assigner les rôles
+        if (selectedRoleIds.length > 0) {
+          await api.assignUserRoles(editingUser.id, selectedRoleIds)
+        } else {
+          // Si aucun rôle sélectionné, retirer tous les rôles
+          const currentRoleIds = editingUser.roles?.map(r => r.id) || []
+          for (const roleId of currentRoleIds) {
+            await api.detachUserRole(editingUser.id, roleId)
+          }
+        }
+      } else {
+        // Création
+        await api.createUser({
+          email: formData.email,
+          password: formData.password,
+          fullName: formData.fullName,
+          role: formData.role,
+          roleIds: selectedRoleIds,
+        })
+      }
+      
+      setIsEditDialogOpen(false)
+      setIsCreateDialogOpen(false)
+      await loadUsers()
+    } catch (error: any) {
+      console.error('Error saving user:', error)
+      alert(error.message || 'Erreur lors de la sauvegarde')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const handleManageRoles = (user: User) => {
+    setEditingUser(user)
+    setSelectedRoleIds(user.roles?.map(r => r.id) || [])
+    setIsRolesDialogOpen(true)
+  }
+
+  const handleSaveRoles = async () => {
+    if (!editingUser) return
+    
+    try {
+      setProcessing(true)
+      await api.assignUserRoles(editingUser.id, selectedRoleIds)
+      setIsRolesDialogOpen(false)
+      await loadUsers()
+    } catch (error: any) {
+      console.error('Error saving roles:', error)
+      alert(error.message || 'Erreur lors de la sauvegarde')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  const toggleRole = (roleId: string) => {
+    setSelectedRoleIds(prev => 
+      prev.includes(roleId)
+        ? prev.filter(id => id !== roleId)
+        : [...prev, roleId]
+    )
   }
 
   const getRoleBadge = (role: string) => {
@@ -176,10 +320,12 @@ export default function UsersPage() {
               Gérez les utilisateurs et leurs permissions
             </p>
           </div>
-          <Button className="w-full sm:w-auto" disabled>
-            <Plus className="mr-2 h-4 w-4" />
-            Ajouter un utilisateur
-          </Button>
+          {hasPermission('user.create') && (
+            <Button className="w-full sm:w-auto" onClick={handleCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              Ajouter un utilisateur
+            </Button>
+          )}
         </div>
 
         {/* Filters */}
@@ -291,8 +437,9 @@ export default function UsersPage() {
                         <TableHead className="min-w-[200px]">Utilisateur</TableHead>
                         <TableHead className="min-w-[150px]">Email</TableHead>
                         <TableHead className="min-w-[120px]">Rôle</TableHead>
+                        <TableHead className="min-w-[150px]">Rôles assignés</TableHead>
                         <TableHead className="min-w-[100px]">Statut</TableHead>
-                        <TableHead className="text-right min-w-[150px]">Actions</TableHead>
+                        <TableHead className="text-right min-w-[200px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -304,10 +451,10 @@ export default function UsersPage() {
                                 <UserIcon className="h-5 w-5 text-primary" />
                               </div>
                               <div>
-                                <div className="font-medium">{user.fullName}</div>
+                                <div className="font-medium">{user.fullName || 'Sans nom'}</div>
                                 {user.roles && user.roles.length > 0 && (
                                   <div className="text-xs text-muted-foreground">
-                                    {user.roles.length} rôle(s)
+                                    {user.roles.length} rôle(s) assigné(s)
                                   </div>
                                 )}
                               </div>
@@ -320,6 +467,24 @@ export default function UsersPage() {
                             </div>
                           </TableCell>
                           <TableCell>{getRoleBadge(user.role)}</TableCell>
+                          <TableCell>
+                            {user.roles && user.roles.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {user.roles.slice(0, 2).map((role: any) => (
+                                  <Badge key={role.id} variant="outline" className="text-xs">
+                                    {role.name}
+                                  </Badge>
+                                ))}
+                                {user.roles.length > 2 && (
+                                  <Badge variant="outline" className="text-xs">
+                                    +{user.roles.length - 2}
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Aucun</span>
+                            )}
+                          </TableCell>
                           <TableCell>
                             {user.isActive ? (
                               <Badge variant="outline" className="text-green-600 border-green-600">
@@ -335,34 +500,42 @@ export default function UsersPage() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleEdit(user)}
-                                disabled={processing}
-                              >
-                                <Edit className="h-4 w-4 mr-1" />
-                                Modifier
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleToggleActive(user)}
-                                disabled={processing || user.id === currentUser?.id}
-                                className={user.isActive ? 'text-red-600 hover:text-red-700' : 'text-green-600 hover:text-green-700'}
-                              >
-                                {user.isActive ? (
-                                  <>
-                                    <XCircle className="h-4 w-4 mr-1" />
-                                    Désactiver
-                                  </>
-                                ) : (
-                                  <>
-                                    <CheckCircle2 className="h-4 w-4 mr-1" />
-                                    Activer
-                                  </>
-                                )}
-                              </Button>
+                              {hasPermission('user.update') && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleEdit(user)}
+                                    disabled={processing}
+                                    title="Modifier"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleManageRoles(user)}
+                                    disabled={processing}
+                                    title="Gérer les rôles"
+                                  >
+                                    <Shield className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleToggleActive(user)}
+                                    disabled={processing || user.id === currentUser?.id}
+                                    className={user.isActive ? 'text-red-600 hover:text-red-700' : 'text-green-600 hover:text-green-700'}
+                                    title={user.isActive ? 'Désactiver' : 'Activer'}
+                                  >
+                                    {user.isActive ? (
+                                      <XCircle className="h-4 w-4" />
+                                    ) : (
+                                      <CheckCircle2 className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -405,33 +578,192 @@ export default function UsersPage() {
         </Card>
       </div>
 
-      {/* Edit Dialog */}
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
+      {/* Create/Edit Dialog */}
+      <Dialog open={isCreateDialogOpen || isEditDialogOpen} onOpenChange={(open) => {
+        setIsCreateDialogOpen(open)
+        setIsEditDialogOpen(open)
+        if (!open) {
+          setEditingUser(null)
+          setFormData({
+            email: '',
+            password: '',
+            fullName: '',
+            role: 'user',
+            roleIds: [],
+          })
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Modifier l'utilisateur</DialogTitle>
+            <DialogTitle>{editingUser ? 'Modifier l\'utilisateur' : 'Créer un utilisateur'}</DialogTitle>
             <DialogDescription>
-              Modifiez les informations de l'utilisateur. Les modifications seront sauvegardées immédiatement.
+              {editingUser ? 'Modifiez les informations de l\'utilisateur' : 'Remplissez les informations pour créer un nouvel utilisateur'}
             </DialogDescription>
           </DialogHeader>
-          {editingUser && (
-            <div className="space-y-4 py-4">
-              <p className="text-sm text-muted-foreground">
-                La modification des utilisateurs sera disponible prochainement.
-              </p>
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Nom complet: {editingUser.fullName}</p>
-                <p className="text-sm font-medium">Email: {editingUser.email}</p>
-                <p className="text-sm font-medium">Rôle: {editingUser.role}</p>
-                <p className="text-sm font-medium">
-                  Statut: {editingUser.isActive ? 'Actif' : 'Inactif'}
-                </p>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="fullName">Nom complet</Label>
+              <Input
+                id="fullName"
+                value={formData.fullName}
+                onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                placeholder="Jean Dupont"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email *</Label>
+              <Input
+                id="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="jean.dupont@example.com"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">{editingUser ? 'Nouveau mot de passe (laisser vide pour ne pas changer)' : 'Mot de passe *'}</Label>
+              <Input
+                id="password"
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="••••••••"
+                required={!editingUser}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role">Rôle par défaut</Label>
+              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">Utilisateur</SelectItem>
+                  <SelectItem value="manager">Gestionnaire</SelectItem>
+                  <SelectItem value="admin">Administrateur</SelectItem>
+                  <SelectItem value="viewer">Visualiseur</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Rôles assignés</Label>
+              <div className="border rounded-md p-4 max-h-48 overflow-y-auto">
+                {loadingRoles ? (
+                  <div className="text-sm text-muted-foreground">Chargement des rôles...</div>
+                ) : roles.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Aucun rôle disponible</div>
+                ) : (
+                  <div className="space-y-2">
+                    {roles.filter(r => r.isActive !== false).map((role) => (
+                      <div key={role.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`role-${role.id}`}
+                          checked={selectedRoleIds.includes(role.id)}
+                          onCheckedChange={() => toggleRole(role.id)}
+                        />
+                        <Label
+                          htmlFor={`role-${role.id}`}
+                          className="text-sm font-normal cursor-pointer flex-1"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>{role.name}</span>
+                            {role.isSystem && (
+                              <Badge variant="outline" className="text-xs ml-2">Système</Badge>
+                            )}
+                          </div>
+                          {role.description && (
+                            <p className="text-xs text-muted-foreground mt-0.5">{role.description}</p>
+                          )}
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-          )}
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
-              Fermer
+            <Button variant="outline" onClick={() => {
+              setIsCreateDialogOpen(false)
+              setIsEditDialogOpen(false)
+            }}>
+              Annuler
+            </Button>
+            <Button onClick={handleSaveUser} disabled={processing || !formData.email || (!editingUser && !formData.password)}>
+              {processing ? 'Enregistrement...' : editingUser ? 'Enregistrer' : 'Créer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manage Roles Dialog */}
+      <Dialog open={isRolesDialogOpen} onOpenChange={setIsRolesDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Gérer les rôles de {editingUser?.fullName || editingUser?.email}</DialogTitle>
+            <DialogDescription>
+              Sélectionnez les rôles à assigner à cet utilisateur
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {loadingRoles ? (
+              <div className="text-center py-8">
+                <div className="text-sm text-muted-foreground">Chargement des rôles...</div>
+              </div>
+            ) : roles.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-sm text-muted-foreground">Aucun rôle disponible</div>
+              </div>
+            ) : (
+              <div className="border rounded-md p-4 max-h-96 overflow-y-auto space-y-2">
+                {roles.filter(r => r.isActive !== false).map((role) => (
+                  <div key={role.id} className="flex items-start space-x-3 p-3 rounded-md hover:bg-muted/50">
+                    <Checkbox
+                      id={`manage-role-${role.id}`}
+                      checked={selectedRoleIds.includes(role.id)}
+                      onCheckedChange={() => toggleRole(role.id)}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <Label
+                        htmlFor={`manage-role-${role.id}`}
+                        className="text-sm font-medium cursor-pointer flex items-center gap-2"
+                      >
+                        {role.name}
+                        {role.isSystem && (
+                          <Badge variant="outline" className="text-xs">Système</Badge>
+                        )}
+                      </Label>
+                      {role.description && (
+                        <p className="text-xs text-muted-foreground mt-1">{role.description}</p>
+                      )}
+                      {role.permissions && role.permissions.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {role.permissions.slice(0, 5).map((perm: any) => (
+                            <Badge key={perm.id} variant="secondary" className="text-xs">
+                              {perm.name}
+                            </Badge>
+                          ))}
+                          {role.permissions.length > 5 && (
+                            <Badge variant="secondary" className="text-xs">
+                              +{role.permissions.length - 5}
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsRolesDialogOpen(false)}>
+              Annuler
+            </Button>
+            <Button onClick={handleSaveRoles} disabled={processing}>
+              {processing ? 'Enregistrement...' : 'Enregistrer'}
             </Button>
           </DialogFooter>
         </DialogContent>

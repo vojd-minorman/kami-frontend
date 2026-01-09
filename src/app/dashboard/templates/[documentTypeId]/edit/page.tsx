@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type PDFTemplate, type BonType, type BonField, type BonFieldGroup } from '@/lib/api'
+import { api, type PDFTemplate, type DocumentType, type DocumentField, type DocumentFieldGroup } from '@/lib/api'
 import { Skeleton } from '@/components/ui/skeleton'
 import { 
   ArrowLeft, 
@@ -62,6 +62,10 @@ import {
   Layers,
   Grid3x3,
   FileSignature,
+  Box,
+  LayoutGrid,
+  LayoutList,
+  Square,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -101,7 +105,7 @@ import type { PDFField } from '@/lib/api'
 // Extension personnalisée pour la taille de police
 import { Extension, Mark } from '@tiptap/core'
 
-// Plus besoin de l'extension DataBinding - on utilise maintenant des placeholders {{bon.values.fieldName}}
+// Plus besoin de l'extension DataBinding - on utilise maintenant des placeholders {{document.values.fieldName}}
 // qui seront remplacés directement dans le HTML lors de la génération du PDF avec Puppeteer
 
 const FontSize = Mark.create({
@@ -172,7 +176,7 @@ const FontSize = Mark.create({
 })
 
 // Composant pour un champ draggable
-function DraggableField({ field }: { field: BonField }) {
+function DraggableField({ field }: { field: DocumentField }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: field.id,
     data: {
@@ -186,7 +190,7 @@ function DraggableField({ field }: { field: BonField }) {
     opacity: isDragging ? 0.5 : 1,
   }
 
-  const getTypeIcon = (type: BonField['type']) => {
+  const getTypeIcon = (type: DocumentField['type']) => {
     switch (type) {
       case 'text': return <Type className="h-3 w-3" />
       case 'number': return <Type className="h-3 w-3" />
@@ -266,6 +270,65 @@ function DraggableSignature({
   )
 }
 
+// Composant pour un élément individuel de signature (nom, fonction, date, image)
+function DraggableSignatureElement({ 
+  label, 
+  placeholder, 
+  order,
+  elementType
+}: { 
+  label: string
+  placeholder: string
+  order: number
+  elementType: 'name' | 'role' | 'date' | 'image'
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `signature-element-${placeholder}`,
+    data: {
+      type: 'signature-element',
+      placeholder,
+      order,
+      elementType,
+    },
+  })
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const getIcon = () => {
+    switch (elementType) {
+      case 'name': return <Type className="h-3 w-3 text-blue-600" />
+      case 'role': return <Type className="h-3 w-3 text-blue-600" />
+      case 'date': return <Type className="h-3 w-3 text-blue-600" />
+      case 'image': return <ImageIcon className="h-3 w-3 text-blue-600" />
+      default: return <FileSignature className="h-3 w-3 text-blue-600" />
+    }
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={cn(
+        "p-1.5 rounded border bg-blue-50/50 hover:bg-blue-100/50 cursor-grab active:cursor-grabbing transition-colors border-blue-200/50",
+        isDragging && "opacity-50"
+      )}
+    >
+      <div className="flex items-center gap-1.5">
+        {getIcon()}
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-medium truncate text-blue-900">{label}</p>
+          <p className="text-[10px] text-blue-600 truncate">({`{{${placeholder}}}`})</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Composant pour un champ de groupe draggable
 function DraggableGroupField({ 
   field, 
@@ -273,7 +336,7 @@ function DraggableGroupField({
   groupLabel,
   isRepeatable 
 }: { 
-  field: BonField
+  field: DocumentField
   groupName: string
   groupLabel: string
   isRepeatable: boolean
@@ -294,7 +357,7 @@ function DraggableGroupField({
     opacity: isDragging ? 0.5 : 1,
   }
 
-  const getTypeIcon = (type: BonField['type']) => {
+  const getTypeIcon = (type: DocumentField['type']) => {
     switch (type) {
       case 'text': return <Type className="h-3 w-3" />
       case 'number': return <Type className="h-3 w-3" />
@@ -375,13 +438,13 @@ function EditorDropZone({ children, editor, isDragging }: { children: React.Reac
 export default function EditTemplatePage() {
   const router = useRouter()
   const params = useParams()
-  const bonTypeId = params?.bonTypeId as string
+  const documentTypeId = params?.documentTypeId as string
   const { t } = useLocale()
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [bonType, setBonType] = useState<BonType | null>(null)
+  const [documentType, setDocumentType] = useState<DocumentType | null>(null)
   const [template, setTemplate] = useState<PDFTemplate | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
@@ -398,11 +461,28 @@ export default function EditTemplatePage() {
   const [imageUrl, setImageUrl] = useState('')
   const [tableRows, setTableRows] = useState(3)
   const [tableCols, setTableCols] = useState(3)
+  const [tableWithHeader, setTableWithHeader] = useState(true)
+  const [showTextZoneDialog, setShowTextZoneDialog] = useState(false)
+  const [showLayoutDialog, setShowLayoutDialog] = useState(false)
+  const [layoutType, setLayoutType] = useState<'flex' | 'grid'>('flex')
+  const [layoutColumns, setLayoutColumns] = useState(3)
+  const [layoutItems, setLayoutItems] = useState(3)
+  const [flexDirection, setFlexDirection] = useState<'row' | 'column'>('row')
+  const [justifyContent, setJustifyContent] = useState<string>('flex-start')
+  const [alignItems, setAlignItems] = useState<string>('flex-start')
+  const [placementMode, setPlacementMode] = useState<'text-zone' | 'flex' | 'grid' | null>(null)
   const [selectedText, setSelectedText] = useState('')
+  const [isDrawingTextZone, setIsDrawingTextZone] = useState(false)
+  const [textZoneStart, setTextZoneStart] = useState<{ x: number; y: number } | null>(null)
+  const [textZonePreview, setTextZonePreview] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [selectedTextZone, setSelectedTextZone] = useState<HTMLElement | null>(null)
+  const [isDraggingZone, setIsDraggingZone] = useState(false)
+  const [isResizingZone, setIsResizingZone] = useState(false)
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null)
   const [isResizingRow, setIsResizingRow] = useState(false)
   const [isResizingCol, setIsResizingCol] = useState(false)
   const [zoom, setZoom] = useState(100)
-  const [activeField, setActiveField] = useState<BonField | null>(null)
+  const [activeField, setActiveField] = useState<DocumentField | null>(null)
   const [showFieldsPalette, setShowFieldsPalette] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
@@ -643,22 +723,400 @@ export default function EditTemplatePage() {
     }
   }, [editor])
 
+  // Gestion du mode placement pour zones de texte (clic-glissé) et conteneurs
   useEffect(() => {
-    if (user && bonTypeId) {
-      loadData()
+    if (!editor) return
+
+    const editorElement = editor.view.dom
+    
+    // Gestion du clic-glissé pour créer des zones de texte
+    const handleMouseDown = (e: MouseEvent) => {
+      // Vérifier si on est en mode création de zone de texte
+      if (placementMode === 'text-zone' && isDrawingTextZone) {
+        // Ne pas empêcher si on clique sur une zone existante
+        const target = e.target as HTMLElement
+        if (target.closest('.text-zone-draggable')) {
+          return
+        }
+        
+        e.preventDefault()
+        e.stopPropagation()
+        
+        const editorRect = editorElement.getBoundingClientRect()
+        const x = e.clientX - editorRect.left
+        const y = e.clientY - editorRect.top
+        
+        console.log('Début du dessin de zone:', { x, y, placementMode, isDrawingTextZone })
+        
+        setTextZoneStart({ x, y })
+        setTextZonePreview({ x, y, width: 0, height: 0 })
+      }
     }
-  }, [user, bonTypeId])
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (placementMode === 'text-zone' && isDrawingTextZone && textZoneStart) {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        const editorRect = editorElement.getBoundingClientRect()
+        const currentX = e.clientX - editorRect.left
+        const currentY = e.clientY - editorRect.top
+        
+        const width = Math.abs(currentX - textZoneStart.x)
+        const height = Math.abs(currentY - textZoneStart.y)
+        const x = Math.min(textZoneStart.x, currentX)
+        const y = Math.min(textZoneStart.y, currentY)
+        
+        setTextZonePreview({ x, y, width, height })
+      }
+    }
+    
+    const handleMouseUp = (e: MouseEvent) => {
+      if (placementMode === 'text-zone' && isDrawingTextZone && textZoneStart) {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Vérifier qu'on a bien glissé (pas juste un clic) - accepter même si petit
+        if (textZonePreview && (textZonePreview.width > 5 || textZonePreview.height > 5)) {
+          // Créer la zone de texte avec position et taille
+          const { x, y, width, height } = textZonePreview
+          const minWidth = Math.max(width, 150) // Largeur minimale
+          const minHeight = Math.max(height, 50) // Hauteur minimale
+          
+          // Convertir les coordonnées relatives en position dans le document
+          const { view } = editor
+          const coords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+          
+          if (coords) {
+            const textZoneHTML = `<div class="text-zone-draggable" contenteditable="true" style="position: absolute; left: ${x}px; top: ${y}px; width: ${minWidth}px; min-height: ${minHeight}px; padding: 10px; border: 1px dashed #ccc; background: rgba(255, 255, 255, 0.9); cursor: text; z-index: 10; box-sizing: border-box; page-break-inside: avoid;">
+              <p style="margin: 0;">Zone de texte</p>
+              <div class="resize-handle" style="position: absolute; bottom: 0; right: 0; width: 16px; height: 16px; background: #3b82f6; cursor: nwse-resize; opacity: 0.7; border-radius: 2px 0 0 0; z-index: 11;"></div>
+            </div>`
+            
+            editor.chain()
+              .focus()
+              .setTextSelection(coords.pos)
+              .insertContent(textZoneHTML, {
+                parseOptions: {
+                  preserveWhitespace: 'full' as const,
+                },
+              })
+              .run()
+          }
+        }
+        
+        // Réinitialiser
+        setIsDrawingTextZone(false)
+        setTextZoneStart(null)
+        setTextZonePreview(null)
+        setPlacementMode(null)
+        editorElement.style.cursor = ''
+      } else if (placementMode === 'flex' || placementMode === 'grid') {
+        // Insérer le conteneur à la position du clic
+        const { view } = editor
+        const coords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+        
+        if (coords) {
+          editor.chain()
+            .focus()
+            .setTextSelection(coords.pos)
+            .run()
+        }
+        
+        if (placementMode === 'flex' || placementMode === 'grid') {
+          // Pour Grid : le nombre d'éléments = le nombre de colonnes horizontales
+          // On passe layoutItems comme nombre d'éléments, et undefined pour columns (non utilisé pour Grid)
+          insertLayoutContainerAtPosition(
+            placementMode,
+            layoutItems, // Nombre d'éléments (pour Grid, c'est aussi le nombre de colonnes)
+            placementMode === 'grid' ? undefined : layoutColumns, // Pour Grid, columns n'est pas utilisé
+            flexDirection,
+            justifyContent,
+            alignItems
+          )
+        }
+        setPlacementMode(null)
+        editorElement.style.cursor = ''
+        setShowLayoutDialog(false)
+      }
+    }
+
+    // Gérer les événements de souris pour le clic-glissé
+    if (placementMode === 'text-zone' && isDrawingTextZone) {
+      editorElement.addEventListener('mousedown', handleMouseDown, true)
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      editorElement.style.cursor = 'crosshair'
+      editorElement.style.pointerEvents = 'auto'
+      
+      return () => {
+        editorElement.removeEventListener('mousedown', handleMouseDown, true)
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+        editorElement.style.cursor = ''
+        editorElement.style.pointerEvents = ''
+      }
+    } else if (placementMode === 'flex' || placementMode === 'grid') {
+      // Utiliser capture pour intercepter le clic avant Tiptap
+      const handleEditorClick = (e: MouseEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        if (placementMode === 'flex' || placementMode === 'grid') {
+          // Insérer le conteneur à la position du clic
+          const { view } = editor
+          const coords = view.posAtCoords({ left: e.clientX, top: e.clientY })
+          
+          if (coords) {
+            editor.chain()
+              .focus()
+              .setTextSelection(coords.pos)
+              .run()
+          }
+          
+          if (placementMode === 'flex' || placementMode === 'grid') {
+            // Pour Grid : le nombre d'éléments = le nombre de colonnes horizontales
+            // On passe layoutItems comme nombre d'éléments, et undefined pour columns (non utilisé pour Grid)
+            insertLayoutContainerAtPosition(
+              placementMode,
+              layoutItems, // Nombre d'éléments
+              placementMode === 'grid' ? undefined : layoutColumns, // Pour Grid, columns n'est pas utilisé
+              flexDirection,
+              justifyContent,
+              alignItems
+            )
+          }
+          setPlacementMode(null)
+          editorElement.style.cursor = ''
+          setShowLayoutDialog(false)
+        }
+      }
+      
+      editorElement.addEventListener('click', handleEditorClick, true)
+      editorElement.style.cursor = 'crosshair'
+      editorElement.style.pointerEvents = 'auto'
+      
+      return () => {
+        editorElement.removeEventListener('click', handleEditorClick, true)
+        editorElement.style.cursor = ''
+        editorElement.style.pointerEvents = ''
+      }
+    }
+    
+    return () => {}
+  }, [editor, placementMode, isDrawingTextZone, textZoneStart, textZonePreview, layoutItems, layoutColumns, flexDirection, justifyContent, alignItems])
+
+  // Gestion du déplacement, redimensionnement et duplication des zones de texte
+  useEffect(() => {
+    if (!editor) return
+
+    const editorElement = editor.view.dom
+    
+    // Fonction pour trouver la zone de texte la plus proche d'un point
+    const findTextZoneAtPoint = (x: number, y: number): HTMLElement | null => {
+      const zones = editorElement.querySelectorAll('.text-zone-draggable')
+      for (const zone of zones) {
+        const rect = (zone as HTMLElement).getBoundingClientRect()
+        const editorRect = editorElement.getBoundingClientRect()
+        const relativeX = rect.left - editorRect.left
+        const relativeY = rect.top - editorRect.top
+        
+        if (x >= relativeX && x <= relativeX + rect.width && 
+            y >= relativeY && y <= relativeY + rect.height) {
+          return zone as HTMLElement
+        }
+      }
+      return null
+    }
+
+    // Fonction pour vérifier si on clique sur une poignée de redimensionnement
+    const isResizeHandle = (element: HTMLElement): boolean => {
+      return element.classList.contains('resize-handle') || 
+             element.closest('.resize-handle') !== null
+    }
+
+    const handleZoneMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      
+      // Ignorer si on est en train de dessiner une nouvelle zone
+      if (isDrawingTextZone) return
+      
+      // Vérifier si on clique sur une zone de texte
+      const zone = target.closest('.text-zone-draggable') as HTMLElement
+      if (!zone) return
+
+      // Vérifier si on clique sur une poignée de redimensionnement
+      if (isResizeHandle(target)) {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsResizingZone(true)
+        setSelectedTextZone(zone)
+        
+        const editorRect = editorElement.getBoundingClientRect()
+        const zoneRect = zone.getBoundingClientRect()
+        const startX = e.clientX
+        const startY = e.clientY
+        const startWidth = zoneRect.width
+        const startHeight = zoneRect.height
+        
+        const handleResizeMove = (moveEvent: MouseEvent) => {
+          const deltaX = moveEvent.clientX - startX
+          const deltaY = moveEvent.clientY - startY
+          
+          const newWidth = Math.max(100, startWidth + deltaX)
+          const newHeight = Math.max(50, startHeight + deltaY)
+          
+          zone.style.width = `${newWidth}px`
+          zone.style.minHeight = `${newHeight}px`
+        }
+        
+        const handleResizeUp = () => {
+          setIsResizingZone(false)
+          document.removeEventListener('mousemove', handleResizeMove)
+          document.removeEventListener('mouseup', handleResizeUp)
+        }
+        
+        document.addEventListener('mousemove', handleResizeMove)
+        document.addEventListener('mouseup', handleResizeUp)
+        return
+      }
+
+      // Déplacement de la zone
+      if (e.button === 0 && !target.isContentEditable) {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDraggingZone(true)
+        setSelectedTextZone(zone)
+        
+        const editorRect = editorElement.getBoundingClientRect()
+        const zoneRect = zone.getBoundingClientRect()
+        const offsetX = e.clientX - zoneRect.left
+        const offsetY = e.clientY - zoneRect.top
+        setDragOffset({ x: offsetX, y: offsetY })
+        
+        const handleDragMove = (moveEvent: MouseEvent) => {
+          const newX = moveEvent.clientX - editorRect.left - offsetX
+          const newY = moveEvent.clientY - editorRect.top - offsetY
+          
+          zone.style.left = `${Math.max(0, newX)}px`
+          zone.style.top = `${Math.max(0, newY)}px`
+        }
+        
+        const handleDragUp = () => {
+          setIsDraggingZone(false)
+          setDragOffset(null)
+          document.removeEventListener('mousemove', handleDragMove)
+          document.removeEventListener('mouseup', handleDragUp)
+        }
+        
+        document.addEventListener('mousemove', handleDragMove)
+        document.addEventListener('mouseup', handleDragUp)
+      }
+    }
+
+    // Gestion du clic pour sélectionner une zone
+    const handleZoneClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      const zone = target.closest('.text-zone-draggable') as HTMLElement
+      
+      if (zone) {
+        setSelectedTextZone(zone)
+        zone.style.borderColor = '#3b82f6'
+        zone.style.boxShadow = '0 0 0 2px rgba(59, 130, 246, 0.2)'
+        
+        // Désélectionner les autres zones
+        const allZones = editorElement.querySelectorAll('.text-zone-draggable')
+        allZones.forEach((z) => {
+          if (z !== zone) {
+            (z as HTMLElement).style.borderColor = '#ccc'
+            ;(z as HTMLElement).style.boxShadow = 'none'
+          }
+        })
+      } else {
+        // Désélectionner toutes les zones
+        setSelectedTextZone(null)
+        const allZones = editorElement.querySelectorAll('.text-zone-draggable')
+        allZones.forEach((z) => {
+          (z as HTMLElement).style.borderColor = '#ccc'
+          ;(z as HTMLElement).style.boxShadow = 'none'
+        })
+      }
+    }
+
+    // Gestion du clavier pour duplication et suppression
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedTextZone) return
+      
+      // Ctrl+D ou Ctrl+C pour dupliquer
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault()
+        
+        const zoneRect = selectedTextZone.getBoundingClientRect()
+        const editorRect = editorElement.getBoundingClientRect()
+        const newX = zoneRect.left - editorRect.left + 20
+        const newY = zoneRect.top - editorRect.top + 20
+        
+        const clonedZone = selectedTextZone.cloneNode(true) as HTMLElement
+        clonedZone.style.left = `${newX}px`
+        clonedZone.style.top = `${newY}px`
+        clonedZone.style.borderColor = '#3b82f6'
+        clonedZone.style.boxShadow = '0 0 0 2px rgba(59, 130, 246, 0.2)'
+        
+        // Insérer la zone dupliquée dans l'éditeur
+        const { view } = editor
+        const coords = view.posAtCoords({ left: zoneRect.left + 20, top: zoneRect.top + 20 })
+        if (coords) {
+          editor.chain()
+            .focus()
+            .setTextSelection(coords.pos)
+            .insertContent(clonedZone.outerHTML, {
+              parseOptions: {
+                preserveWhitespace: 'full' as const,
+              },
+            })
+            .run()
+        }
+        
+        setSelectedTextZone(clonedZone)
+      }
+      
+      // Supprimer avec Delete ou Backspace
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedTextZone) {
+        e.preventDefault()
+        selectedTextZone.remove()
+        setSelectedTextZone(null)
+      }
+    }
+
+    editorElement.addEventListener('mousedown', handleZoneMouseDown, true)
+    editorElement.addEventListener('click', handleZoneClick, true)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      editorElement.removeEventListener('mousedown', handleZoneMouseDown, true)
+      editorElement.removeEventListener('click', handleZoneClick, true)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [editor, isDrawingTextZone, selectedTextZone, isDraggingZone, isResizingZone, dragOffset])
+
+  useEffect(() => {
+    if (!authLoading && user && documentTypeId) {
+      loadData()
+    } else if (!authLoading && !user) {
+      setLoading(false)
+    }
+  }, [user, documentTypeId, authLoading])
 
   const loadData = async () => {
     try {
       setLoading(true)
       setError(null)
       
-      const bonTypeData = await api.getBonType(bonTypeId)
-      setBonType(bonTypeData)
+      const documentTypeData = await api.getDocumentType(documentTypeId)
+      setDocumentType(documentTypeData)
       
       try {
-        const templateData = await api.getTemplate(bonTypeId)
+        const templateData = await api.getTemplate(documentTypeId)
         if (templateData) {
           // Normaliser les marges : remplacer 50 par 2.5 si nécessaire
           const normalizedTemplate = { ...templateData }
@@ -694,7 +1152,7 @@ export default function EditTemplatePage() {
           if (needsUpdate) {
             // Sauvegarder silencieusement la correction
             try {
-              await api.saveTemplate(bonTypeId, normalizedTemplate)
+              await api.saveTemplate(documentTypeId, normalizedTemplate)
             } catch (err) {
               console.error('Erreur lors de la sauvegarde de la normalisation:', err)
             }
@@ -743,7 +1201,7 @@ export default function EditTemplatePage() {
     try {
       setSaving(true)
       setError(null)
-      const result = await api.createDefaultTemplate(bonTypeId)
+      const result = await api.createDefaultTemplate(documentTypeId)
       setTemplate(result.template)
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
@@ -807,7 +1265,7 @@ export default function EditTemplatePage() {
     })
   }
 
-  // Plus besoin d'extraire les positions - les placeholders {{bon.values.fieldName}} 
+  // Plus besoin d'extraire les positions - les placeholders {{document.values.fieldName}} 
   // seront remplacés directement dans le HTML lors de la génération du PDF avec Puppeteer
 
   const handleSave = async () => {
@@ -821,21 +1279,21 @@ export default function EditTemplatePage() {
       setError(null)
       
       // Récupérer le contenu HTML de l'éditeur
-      // Les placeholders {{bon.values.fieldName}} seront remplacés lors de la génération du PDF
+      // Les placeholders {{document.values.fieldName}} seront remplacés lors de la génération du PDF
       const html = editor.getHTML()
       
       console.log('Saving template HTML with placeholders')
       console.log('HTML content length:', html.length)
       
       // Compter les placeholders dans le HTML
-      const placeholderMatches = html.match(/\{\{bon\.values\.\w+\}\}/g)
+      const placeholderMatches = html.match(/\{\{document\.values\.\w+\}\}/g)
       const placeholderCount = placeholderMatches?.length || 0
       console.log('Found placeholders:', placeholderCount)
       
       const updatedTemplate: PDFTemplate = {
         ...template,
         // Sauvegarder le HTML directement dans content
-        // Les placeholders {{bon.values.fieldName}} seront remplacés par Puppeteer lors de la génération
+        // Les placeholders {{document.values.fieldName}} seront remplacés par Puppeteer lors de la génération
         content: html,
         // Plus besoin de fields ni de positions - tout est dans le HTML avec les placeholders
         fields: [],
@@ -849,7 +1307,7 @@ export default function EditTemplatePage() {
       
       console.log('Saving template with', placeholderCount, 'placeholders')
       
-      await api.saveTemplate(bonTypeId, updatedTemplate)
+      await api.saveTemplate(documentTypeId, updatedTemplate)
       setTemplate(updatedTemplate)
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
@@ -934,16 +1392,16 @@ export default function EditTemplatePage() {
   }
 
   // Fonction pour insérer un tableau de groupe répétable
-  const handleInsertRepeatableGroup = (group: BonFieldGroup) => {
+  const handleInsertRepeatableGroup = (group: DocumentFieldGroup) => {
     if (!editor || !group.fields || group.fields.length === 0) {
       console.warn('Editor or group fields not available')
       return
     }
 
     // Créer un tableau avec une ligne d'en-tête et une ligne de données
-    // Pour les groupes répétables, bon.values.groupName est un array d'objets
-    // Format dans bon.values: { "groupName": [{field1: val1, field2: val2}, ...] }
-    // On utilise des placeholders avec le format: {{bon.values.groupName.fieldName}}
+    // Pour les groupes répétables, document.values.groupName est un array d'objets
+    // Format dans document.values: { "groupName": [{field1: val1, field2: val2}, ...] }
+    // On utilise des placeholders avec le format: {{document.values.groupName.fieldName}}
     // Le backend devra être modifié pour gérer cette structure imbriquée
     
     // Ligne d'en-tête avec les labels
@@ -952,11 +1410,11 @@ export default function EditTemplatePage() {
     ).join('')
     
     // Ligne de données avec les placeholders
-    // Format: {{bon.values.groupName.fieldName}}
+    // Format: {{document.values.groupName.fieldName}}
     // Note: Le backend actuel ne gère pas encore les groupes imbriqués,
     // mais on prépare la structure pour une future implémentation
     const dataRow = group.fields.map(field => 
-      `<td><span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">{{bon.values.${group.name}.${field.name}}}</span></td>`
+      `<td><span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">{{document.values.${group.name}.${field.name}}}</span></td>`
     ).join('')
     
     const tableHTML = `<table>
@@ -975,16 +1433,16 @@ export default function EditTemplatePage() {
   }
 
   // Fonction pour insérer les champs d'un groupe simple (non répétable)
-  const handleInsertSimpleGroup = (group: BonFieldGroup) => {
+  const handleInsertSimpleGroup = (group: DocumentFieldGroup) => {
     if (!editor || !group.fields || group.fields.length === 0) {
       console.warn('Editor or group fields not available')
       return
     }
 
     // Insérer les champs avec leur label et le placeholder
-    // Format: {{bon.values.groupName.fieldName}}
+    // Format: {{document.values.groupName.fieldName}}
     const fieldsHTML = group.fields.map(field => {
-      const placeholder = `{{bon.values.${group.name}.${field.name}}}`
+      const placeholder = `{{document.values.${group.name}.${field.name}}}`
       return `<p><strong>${field.label}:</strong> <span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">${placeholder}</span></p>`
     }).join('')
     
@@ -999,9 +1457,9 @@ export default function EditTemplatePage() {
   }
 
   // Fonction pour lier du texte sélectionné à un champ
-  // IMPORTANT: On utilise maintenant des placeholders {{bon.values.fieldName}} qui seront remplacés
+  // IMPORTANT: On utilise maintenant des placeholders {{document.values.fieldName}} qui seront remplacés
   // lors de la génération du PDF avec Puppeteer. Plus besoin de calculer les positions !
-  // Pour les champs de groupes: {{bon.values.groupName.fieldName}}
+  // Pour les champs de groupes: {{document.values.groupName.fieldName}}
   const handleLinkToField = (fieldName: string, fieldLabel?: string, groupName?: string) => {
     if (!editor) {
       console.warn('Editor not available for linking field')
@@ -1016,8 +1474,8 @@ export default function EditTemplatePage() {
     
     // Utiliser un placeholder qui sera remplacé lors de la génération du PDF
     // Le placeholder sera remplacé par la valeur réelle lors de la génération avec Puppeteer
-    // Pour les champs de groupes: {{bon.values.groupName.fieldName}}
-    const placeholder = groupName ? `{{bon.values.${groupName}.${fieldName}}}` : `{{bon.values.${fieldName}}}`
+    // Pour les champs de groupes: {{document.values.groupName.fieldName}}
+    const placeholder = groupName ? `{{document.values.${groupName}.${fieldName}}}` : `{{document.values.${fieldName}}}`
     // Afficher le placeholder dans l'éditeur pour que l'utilisateur voie où la valeur sera placée
     const spanHTML = `<span style="background-color: #fef3c7; padding: 2px 4px; border-radius: 3px; font-weight: 500;">${placeholder}</span>`
     console.log('Inserting HTML with placeholder:', spanHTML)
@@ -1065,22 +1523,196 @@ export default function EditTemplatePage() {
     setShowDataBinding(false)
   }
 
-  // Fonction pour insérer un emplacement de signature
+  // Fonction pour insérer un emplacement de signature dans une cellule de tableau
   const handleInsertSignature = (order?: number) => {
     if (!editor) return
     
     const placeholder = order ? `{{signature_${order}}}` : '{{signatures}}'
     const displayText = order ? `Signature ${order}` : 'Signatures'
-    const spanHTML = `<span style="background-color: #dbeafe; padding: 4px 8px; border-radius: 4px; font-weight: 500; border: 1px dashed #3b82f6;">${displayText} (${placeholder})</span>`
+    
+    // Vérifier si le curseur est dans un tableau
+    const { state } = editor
+    const { selection } = state
+    const $anchor = selection.$anchor
+    
+    // Chercher si on est dans une cellule de tableau
+    let cellNode = null
+    let depth = $anchor.depth
+    while (depth > 0) {
+      const node = $anchor.node(depth)
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        cellNode = node
+        break
+      }
+      depth--
+    }
+    
+    if (cellNode) {
+      // On est dans un tableau, insérer le placeholder dans la cellule
+      const placeholderHTML = `<span style="background-color: #dbeafe; padding: 2px 6px; border-radius: 3px; font-weight: 500; border: 1px dashed #3b82f6; font-size: 11px;">${displayText}</span>`
+      editor.chain()
+        .focus()
+        .insertContent(placeholderHTML + ' ' + placeholder, {
+          parseOptions: {
+            preserveWhitespace: 'full' as const,
+          },
+        })
+        .run()
+    } else {
+      // Pas dans un tableau, proposer de créer un tableau ou insérer normalement
+      // Pour l'instant, on insère normalement mais on suggère d'utiliser un tableau
+      const spanHTML = `<span style="background-color: #dbeafe; padding: 4px 8px; border-radius: 4px; font-weight: 500; border: 1px dashed #3b82f6;">${displayText} (${placeholder})</span>`
+      
+      editor.chain()
+        .focus()
+        .insertContent(spanHTML, {
+          parseOptions: {
+            preserveWhitespace: 'full' as const,
+          },
+        })
+        .run()
+    }
+  }
+  
+  // Fonction pour créer un tableau de signatures vide
+  const handleCreateSignatureTable = (numSignatures: number = 2) => {
+    if (!editor) return
+    
+    // Créer un tableau avec une ligne et numSignatures colonnes
+    const tableHTML = `
+      <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+        <tbody>
+          <tr>
+            ${Array.from({ length: numSignatures }, (_, i) => {
+              const placeholder = `{{signature_${i + 1}}}`
+              return `<td style="border: 1px solid #000; padding: 8px; text-align: center; vertical-align: top; width: ${100 / numSignatures}%;">
+                <span style="background-color: #dbeafe; padding: 2px 6px; border-radius: 3px; font-weight: 500; border: 1px dashed #3b82f6; font-size: 11px; display: inline-block; margin-bottom: 4px;">Signature ${i + 1}</span>
+                <div style="min-height: 80px;">${placeholder}</div>
+              </td>`
+            }).join('')}
+          </tr>
+        </tbody>
+      </table>
+    `
     
     editor.chain()
       .focus()
-      .insertContent(spanHTML, {
+      .insertContent(tableHTML, {
         parseOptions: {
           preserveWhitespace: 'full' as const,
         },
       })
       .run()
+  }
+
+  // Fonction pour insérer une zone de texte à la position du curseur
+  const insertTextZoneAtPosition = () => {
+    if (!editor) return
+    
+    const textZoneHTML = `<div class="text-zone" style="position: relative; display: inline-block; width: 100%; page-break-inside: avoid; margin: 10px 0; padding: 10px; border: 1px dashed #ccc; min-height: 50px; vertical-align: top;"><p style="margin: 0;">Zone de texte</p></div>`
+    
+    editor.chain()
+      .focus()
+      .insertContent(textZoneHTML, {
+        parseOptions: {
+          preserveWhitespace: 'full' as const,
+        },
+      })
+      .run()
+  }
+
+  // Activer le mode placement pour zone de texte (clic-glissé)
+  const handleInsertTextZone = () => {
+    setPlacementMode('text-zone')
+    setIsDrawingTextZone(true)
+    if (editor) {
+      editor.view.dom.style.cursor = 'crosshair'
+    }
+  }
+
+  // Fonction pour insérer un conteneur flex ou grid à la position du curseur
+  const insertLayoutContainerAtPosition = (
+    type: 'flex' | 'grid',
+    items?: number,
+    columns?: number,
+    direction?: 'row' | 'column',
+    justify?: string,
+    align?: string
+  ) => {
+    if (!editor) return
+    
+    let containerHTML = ''
+    // Pour Grid : le nombre d'éléments = le nombre de colonnes horizontales
+    // Pour Flex : numItems vient de 'items' avec défaut 3
+    // IMPORTANT: Pour Grid, on ignore 'columns' et on utilise uniquement 'items'
+    const numItems = items ? items : 3
+    
+    if (type === 'flex') {
+      const flexDir = direction || 'row'
+      const justifyContent = justify || 'flex-start'
+      const alignItems = align || 'flex-start'
+      
+      if (flexDir === 'row') {
+        // Pour row : utiliser inline-block pour forcer l'affichage horizontal
+        const itemWidthPercent = Math.floor(100 / numItems)
+        containerHTML = `<div class="flex-container-row" style="display: block !important; width: 100% !important; margin: 10px 0 !important; padding: 0 !important; border: 1px dashed #ccc !important; box-sizing: border-box !important; font-size: 0 !important; text-align: ${justifyContent === 'center' ? 'center' : justifyContent === 'flex-end' ? 'right' : 'left'} !important;">
+          ${Array.from({ length: numItems }, (_, i) => `
+            <div class="flex-item-inline" style="display: inline-block !important; width: ${itemWidthPercent}% !important; vertical-align: top !important; position: relative !important; page-break-inside: avoid !important; padding: 10px !important; border: 1px dashed #ddd !important; box-sizing: border-box !important; font-size: 12px !important; margin: 0 !important;">
+              <p style="margin: 0;">Élément ${i + 1}</p>
+            </div>
+          `).join('')}
+        </div>`
+      } else {
+        // Pour column : affichage vertical normal
+        containerHTML = `<div class="flex-container-column" style="display: block !important; width: 100% !important; margin: 10px 0 !important; padding: 10px !important; border: 1px dashed #ccc !important; box-sizing: border-box !important;">
+          ${Array.from({ length: numItems }, (_, i) => `
+            <div class="flex-item-block" style="display: block !important; width: 100% !important; position: relative !important; page-break-inside: avoid !important; padding: 10px !important; border: 1px dashed #ddd !important; box-sizing: border-box !important; margin-bottom: 10px !important;">
+              <p style="margin: 0;">Élément ${i + 1}</p>
+            </div>
+          `).join('')}
+        </div>`
+      }
+    } else {
+      // Grid : le nombre d'éléments = le nombre de colonnes horizontales
+      // Utiliser inline-block pour afficher horizontalement sans tableau
+      const numCols = numItems // Le nombre d'éléments = le nombre de colonnes horizontales
+      const itemWidthPercent = 100 / numCols
+      
+      // Debug pour vérifier
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Grid creation - Final:', { 
+          type, 
+          itemsParam: items, 
+          numItems, 
+          numCols,
+          itemWidthPercent,
+          'columns param (ignored)': columns
+        })
+      }
+      
+      containerHTML = `<div class="grid-container-inline" style="display: block !important; width: 100% !important; margin: 10px 0 !important; padding: 0 !important; border: 1px dashed #ccc !important; box-sizing: border-box !important; font-size: 0 !important; line-height: 0 !important;">
+        ${Array.from({ length: numCols }, (_, colIndex) => `
+          <div class="grid-item-inline" style="display: inline-block !important; width: ${itemWidthPercent}% !important; vertical-align: top !important; position: relative !important; page-break-inside: avoid !important; padding: 10px !important; border: 1px dashed #ddd !important; box-sizing: border-box !important; font-size: 12px !important; line-height: normal !important; margin: 0 !important;">
+            <p style="margin: 0;">Élément ${colIndex + 1}</p>
+          </div>
+        `).join('')}
+      </div>`
+    }
+    
+    editor.chain()
+      .focus()
+      .insertContent(containerHTML, {
+        parseOptions: {
+          preserveWhitespace: 'full' as const,
+        },
+      })
+      .run()
+  }
+
+  // Activer le mode placement pour conteneur
+  const handleInsertLayoutContainer = (type: 'flex' | 'grid') => {
+    setLayoutType(type)
+    setShowLayoutDialog(true)
   }
 
   // Gestion du drag & drop
@@ -1100,7 +1732,7 @@ export default function EditTemplatePage() {
     
     // Vérifier si on a déposé sur l'éditeur
     // over.id est une string (l'ID du droppable), pas un Node
-    const isOverEditor = over.id === 'editor-content' || String(over.id) === 'editor-drop-zone'
+    const isOverEditor = over.id === 'editor-content' || String(over.id) === 'editor-drop-zone' || over.id === 'editor-drop-zone'
     
     if (isOverEditor) {
       const data = active.data.current
@@ -1128,6 +1760,25 @@ export default function EditTemplatePage() {
           if (!editor) return
           editor.commands.focus()
           handleInsertSignature(order)
+        }, 10)
+      } else if (data?.type === 'signature-element') {
+        // Élément individuel de signature (nom, fonction, date, image)
+        const placeholder = data.placeholder
+        const label = data.elementType === 'name' ? 'Nom' :
+                     data.elementType === 'role' ? 'Fonction' :
+                     data.elementType === 'date' ? 'Date' : 'Image'
+        setTimeout(() => {
+          if (!editor) return
+          editor.commands.focus()
+          const spanHTML = `<span style="background-color: #dbeafe; padding: 2px 6px; border-radius: 3px; font-weight: 500; border: 1px dashed #3b82f6; font-size: 11px; display: inline-block;">${label} ({{${placeholder}}})</span>`
+          editor.chain()
+            .focus()
+            .insertContent(spanHTML, {
+              parseOptions: {
+                preserveWhitespace: 'full' as const,
+              },
+            })
+            .run()
         }, 10)
       }
     }
@@ -1336,6 +1987,85 @@ export default function EditTemplatePage() {
           >
             <TableIcon className="h-4 w-4" />
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleInsertTextZone()}
+            title="Créer une zone de texte (cliquez-glissez pour dessiner)"
+            className={placementMode === 'text-zone' ? 'bg-accent' : ''}
+          >
+            <Square className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleInsertLayoutContainer('flex')}
+            title="Placer un conteneur Flexbox (cliquez où vous voulez)"
+            className={placementMode === 'flex' ? 'bg-accent' : ''}
+          >
+            <LayoutList className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleInsertLayoutContainer('grid')}
+            title="Placer un conteneur Grid (cliquez où vous voulez)"
+            className={placementMode === 'grid' ? 'bg-accent' : ''}
+          >
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+          {selectedTextZone && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (selectedTextZone && editor) {
+                    const zoneRect = selectedTextZone.getBoundingClientRect()
+                    const editorElement = editor.view.dom
+                    const editorRect = editorElement.getBoundingClientRect()
+                    const newX = zoneRect.left - editorRect.left + 20
+                    const newY = zoneRect.top - editorRect.top + 20
+                    
+                    const clonedZone = selectedTextZone.cloneNode(true) as HTMLElement
+                    clonedZone.style.left = `${newX}px`
+                    clonedZone.style.top = `${newY}px`
+                    
+                    const { view } = editor
+                    const coords = view.posAtCoords({ left: zoneRect.left + 20, top: zoneRect.top + 20 })
+                    if (coords) {
+                      editor.chain()
+                        .focus()
+                        .setTextSelection(coords.pos)
+                        .insertContent(clonedZone.outerHTML, {
+                          parseOptions: {
+                            preserveWhitespace: 'full' as const,
+                          },
+                        })
+                        .run()
+                    }
+                    setSelectedTextZone(clonedZone)
+                  }
+                }}
+                title="Dupliquer la zone (Ctrl+D)"
+              >
+                <Layers className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  if (selectedTextZone) {
+                    selectedTextZone.remove()
+                    setSelectedTextZone(null)
+                  }
+                }}
+                title="Supprimer la zone (Delete)"
+              >
+                <span className="text-red-500 font-bold text-lg">×</span>
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Contrôles de tableau (si dans un tableau) */}
@@ -1433,10 +2163,10 @@ export default function EditTemplatePage() {
           </Link>
           <div>
             <h1 className="text-xl font-semibold">
-              {bonType?.name || 'Template PDF'}
+              {documentType?.name || 'Template PDF'}
             </h1>
             <p className="text-xs text-muted-foreground">
-              {bonType?.code || 'N/A'}
+              {documentType?.code || 'N/A'}
             </p>
           </div>
         </div>
@@ -1501,8 +2231,8 @@ export default function EditTemplatePage() {
         </div>
       )}
 
-      {/* Vérifier si le bon-type a des champs */}
-      {bonType && (!bonType.fields || bonType.fields.length === 0) ? (
+      {/* Vérifier si le type de document a des champs */}
+      {documentType && (!documentType.fields || documentType.fields.length === 0) ? (
         <Card className="m-6">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -1510,24 +2240,24 @@ export default function EditTemplatePage() {
               Champs requis
             </CardTitle>
             <CardDescription>
-              Avant de créer un template PDF, vous devez d'abord définir les champs (structure) de ce type de bon.
+              Avant de créer un template PDF, vous devez d'abord définir les champs (structure) de ce type de document.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Les champs définissent la structure du formulaire qui sera utilisé pour créer les bons de ce type.
+              Les champs définissent la structure du formulaire qui sera utilisé pour créer les documents de ce type.
               Une fois les champs créés, vous pourrez les placer dans le template PDF via glisser-déposer.
             </p>
             <div className="flex gap-3">
-              <Link href={`/dashboard/bon-types/${bonTypeId}/edit`}>
+              <Link href={`/dashboard/document-types/${documentTypeId}/edit`}>
                 <Button>
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Aller à la configuration du type de bon
+                  Aller à la configuration du type de document
                 </Button>
               </Link>
-              <Link href="/dashboard/bon-types">
+              <Link href="/dashboard/document-types">
                 <Button variant="outline">
-                  Retour à la liste des types de bons
+                  Retour à la liste des types de documents
                 </Button>
               </Link>
             </div>
@@ -1538,7 +2268,7 @@ export default function EditTemplatePage() {
           <CardHeader>
             <CardTitle>Aucun template configuré</CardTitle>
             <CardDescription>
-              Ce type de bon n'a pas encore de template PDF. Créez-en un pour commencer.
+              Ce type de document n'a pas encore de template PDF. Créez-en un pour commencer.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1733,7 +2463,7 @@ export default function EditTemplatePage() {
           {/* Éditeur principal avec palette */}
           <div className="flex-1 overflow-hidden flex">
             {/* Palette de champs */}
-            {showFieldsPalette && (bonType?.fields && bonType.fields.length > 0 || bonType?.fieldGroups && bonType.fieldGroups.length > 0) && (
+            {showFieldsPalette && (documentType?.fields && documentType.fields.length > 0 || documentType?.fieldGroups && documentType.fieldGroups.length > 0) && (
               <div className="w-64 border-r bg-background overflow-y-auto">
                 <div className="p-4 border-b sticky top-0 bg-background z-10">
                   <div className="flex items-center justify-between mb-2">
@@ -1756,11 +2486,11 @@ export default function EditTemplatePage() {
                 
                 <div className="p-2 space-y-3">
                   {/* Champs simples (sans groupe) */}
-                  {bonType.fields && bonType.fields.length > 0 && (
+                  {documentType.fields && documentType.fields.length > 0 && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Champs simples</h4>
                       <div className="space-y-1">
-                        {bonType.fields.filter(f => !f.bonFieldGroupId).map((field) => (
+                        {documentType.fields.filter(f => !f.documentFieldGroupId).map((field) => (
                           <DraggableField key={field.id} field={field} />
                         ))}
                       </div>
@@ -1768,11 +2498,11 @@ export default function EditTemplatePage() {
                   )}
 
                   {/* Groupes de champs */}
-                  {bonType.fieldGroups && bonType.fieldGroups.length > 0 && (
+                  {documentType.fieldGroups && documentType.fieldGroups.length > 0 && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Groupes de champs</h4>
                       <div className="space-y-2">
-                        {bonType.fieldGroups
+                        {documentType.fieldGroups
                           .sort((a, b) => a.order - b.order)
                           .map((group) => (
                             <div
@@ -1849,26 +2579,48 @@ export default function EditTemplatePage() {
                   {/* Section Signatures */}
                   <div className="mt-4 pt-4 border-t">
                     <h4 className="text-xs font-semibold text-muted-foreground mb-2 px-2">Emplacements de signature</h4>
-                    <div className="space-y-1">
-                      {/* Emplacement générique pour toutes les signatures */}
-                      <DraggableSignature 
-                        label="Toutes les signatures"
-                        placeholder="signatures"
-                        order={undefined}
-                      />
-                      {/* Emplacements spécifiques par ordre (1, 2, 3, etc.) */}
-                      {[1, 2, 3, 4, 5].map((order) => (
-                        <DraggableSignature
-                          key={order}
-                          label={`Signature ${order}`}
-                          placeholder={`signature_${order}`}
-                          order={order}
-                        />
-                      ))}
+                    <div className="space-y-1 px-2 mb-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs w-full"
+                        onClick={() => {
+                          if (!editor) return
+                          // Créer un conteneur flex pour les signatures
+                          const maxSigners = 6
+                          let containerHTML = '<div class="flex-container" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; page-break-inside: avoid;">'
+                          
+                          for (let i = 1; i <= maxSigners; i++) {
+                            containerHTML += `<div class="flex-item text-zone" style="flex: 1 1 calc(33.33% - 10px); min-width: 200px; position: relative; page-break-inside: avoid;">
+                              <div style="min-height: 100px; margin: 0; padding: 0;">
+                                <p style="margin: 0; padding: 0; font-weight: bold; font-size: 11pt; line-height: 1.3;">{{signature_${i}_name}}</p>
+                                <p style="margin: 0; padding: 0; font-size: 9pt; color: #333; line-height: 1.3;">{{signature_${i}_role}}</p>
+                                <p style="margin: 0; padding: 0; font-size: 9pt; color: #666; line-height: 1.3;">{{signature_${i}_date}}</p>
+                                <div style="margin-top: 8px; margin-bottom: 0;">{{signature_${i}_image}}</div>
+                              </div>
+                            </div>`
+                          }
+                          containerHTML += '</div>'
+                          
+                          editor.chain().focus().insertContent(containerHTML).run()
+                        }}
+                      >
+                        <TableIcon className="h-3 w-3 mr-1.5" />
+                        Créer un tableau de signatures
+                      </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-2 px-2">
-                      Glissez-déposez pour placer un emplacement de signature dans le template
-                    </p>
+                    
+                    {/* Signatures - uniquement le placeholder générique */}
+                    <div className="mb-3">
+                      <div className="space-y-1">
+                        {/* Emplacement générique pour toutes les signatures */}
+                        <DraggableSignature 
+                          label="Toutes les signatures"
+                          placeholder="signatures"
+                          order={undefined}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1897,6 +2649,7 @@ export default function EditTemplatePage() {
                 transform: `scale(${zoom / 100})`,
                 transformOrigin: 'top center',
                 padding: `${(template.margins?.top ?? template.layout?.margins?.top ?? 2.5)}mm ${(template.margins?.right ?? template.layout?.margins?.right ?? 2.5)}mm ${(template.margins?.bottom ?? template.layout?.margins?.bottom ?? 2.5)}mm ${(template.margins?.left ?? template.layout?.margins?.left ?? 2.5)}mm`,
+                position: 'relative' as const,
               }}
             >
               <style jsx global>{`
@@ -1919,6 +2672,9 @@ export default function EditTemplatePage() {
                   border-collapse: collapse !important;
                   margin: 1rem 0 !important;
                   width: 100% !important;
+                  table-layout: fixed !important;
+                  position: relative !important;
+                  display: table !important;
                 }
                 .ProseMirror table td,
                 .ProseMirror table th {
@@ -1927,6 +2683,159 @@ export default function EditTemplatePage() {
                   min-width: 100px !important;
                   position: relative;
                   cursor: text;
+                  vertical-align: top !important;
+                }
+                /* Zones de texte positionnées */
+                .ProseMirror {
+                  position: relative !important;
+                }
+                .ProseMirror .text-zone {
+                  position: relative;
+                  display: block;
+                  page-break-inside: avoid;
+                  margin: 0;
+                  padding: 0;
+                }
+                /* Zones de texte draggables (créées par clic-glissé) */
+                .ProseMirror .text-zone-draggable {
+                  position: absolute !important;
+                  cursor: move !important;
+                  z-index: 10 !important;
+                  box-sizing: border-box !important;
+                  page-break-inside: avoid !important;
+                  user-select: none !important;
+                  min-width: 150px !important;
+                  min-height: 50px !important;
+                }
+                .ProseMirror .text-zone-draggable:hover {
+                  border-color: #3b82f6 !important;
+                  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1) !important;
+                }
+                .ProseMirror .text-zone-draggable:hover .resize-handle {
+                  opacity: 1 !important;
+                }
+                .ProseMirror .text-zone-draggable[contenteditable="true"] {
+                  cursor: text !important;
+                  user-select: text !important;
+                }
+                .ProseMirror .text-zone-draggable[contenteditable="true"]:focus {
+                  cursor: text !important;
+                  outline: 2px solid #3b82f6 !important;
+                  outline-offset: 2px !important;
+                }
+                /* Poignée de redimensionnement */
+                .ProseMirror .resize-handle {
+                  position: absolute !important;
+                  bottom: 0 !important;
+                  right: 0 !important;
+                  width: 16px !important;
+                  height: 16px !important;
+                  background: #3b82f6 !important;
+                  cursor: nwse-resize !important;
+                  opacity: 0.7 !important;
+                  border-radius: 2px 0 0 0 !important;
+                  z-index: 11 !important;
+                  pointer-events: all !important;
+                }
+                .ProseMirror .resize-handle:hover {
+                  opacity: 1 !important;
+                  background: #2563eb !important;
+                }
+                /* Conteneurs flexbox et grid - APPROCHE INLINE-BLOCK */
+                .ProseMirror .flex-container-row {
+                  display: block !important;
+                  width: 100% !important;
+                  margin: 10px 0 !important;
+                  padding: 0 !important;
+                  border: 1px dashed #ccc !important;
+                  box-sizing: border-box !important;
+                  font-size: 0 !important;
+                  line-height: 0 !important;
+                }
+                .ProseMirror .flex-item-inline {
+                  display: inline-block !important;
+                  vertical-align: top !important;
+                  position: relative !important;
+                  page-break-inside: avoid !important;
+                  padding: 10px !important;
+                  border: 1px dashed #ddd !important;
+                  box-sizing: border-box !important;
+                  font-size: 12px !important;
+                  line-height: normal !important;
+                  margin: 0 !important;
+                }
+                .ProseMirror .flex-container-column {
+                  display: block !important;
+                  width: 100% !important;
+                  margin: 10px 0 !important;
+                  padding: 10px !important;
+                  border: 1px dashed #ccc !important;
+                  box-sizing: border-box !important;
+                }
+                .ProseMirror .flex-item-block {
+                  display: block !important;
+                  width: 100% !important;
+                  position: relative !important;
+                  page-break-inside: avoid !important;
+                  padding: 10px !important;
+                  border: 1px dashed #ddd !important;
+                  box-sizing: border-box !important;
+                  margin-bottom: 10px !important;
+                }
+                /* Grid avec inline-block (sans tableau) */
+                .ProseMirror .grid-container-inline {
+                  display: block !important;
+                  width: 100% !important;
+                  margin: 10px 0 !important;
+                  padding: 0 !important;
+                  border: 1px dashed #ccc !important;
+                  box-sizing: border-box !important;
+                  font-size: 0 !important;
+                  line-height: 0 !important;
+                }
+                .ProseMirror .grid-item-inline {
+                  display: inline-block !important;
+                  vertical-align: top !important;
+                  position: relative !important;
+                  page-break-inside: avoid !important;
+                  padding: 10px !important;
+                  border: 1px dashed #ddd !important;
+                  box-sizing: border-box !important;
+                  font-size: 12px !important;
+                  line-height: normal !important;
+                  margin: 0 !important;
+                }
+                /* Ancien style avec tableau (pour compatibilité) */
+                .ProseMirror .grid-container-table {
+                  width: 100% !important;
+                  border-collapse: separate !important;
+                  border-spacing: 10px !important;
+                  margin: 10px 0 !important;
+                  border: 1px dashed #ccc !important;
+                  box-sizing: border-box !important;
+                  display: table !important;
+                }
+                .ProseMirror .grid-item-cell {
+                  display: table-cell !important;
+                  vertical-align: top !important;
+                  position: relative !important;
+                  page-break-inside: avoid !important;
+                  padding: 10px !important;
+                  border: 1px dashed #ddd !important;
+                  box-sizing: border-box !important;
+                }
+                /* Anciens styles pour compatibilité */
+                .ProseMirror .flex-container {
+                  display: block !important;
+                  width: 100% !important;
+                  margin: 10px 0 !important;
+                  box-sizing: border-box !important;
+                }
+                .ProseMirror .grid-container {
+                  display: table !important;
+                  width: 100% !important;
+                  margin: 10px 0 !important;
+                  box-sizing: border-box !important;
                 }
                 .ProseMirror table th {
                   background-color: #f3f4f6 !important;
@@ -2024,6 +2933,23 @@ export default function EditTemplatePage() {
             </div>
             </EditorDropZone>
             </div>
+            
+            {/* Aperçu de la zone de texte en cours de création */}
+            {textZonePreview && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `${textZonePreview.x}px`,
+                  top: `${textZonePreview.y}px`,
+                  width: `${Math.max(textZonePreview.width, 150)}px`,
+                  height: `${Math.max(textZonePreview.height, 50)}px`,
+                  border: '2px dashed #3b82f6',
+                  background: 'rgba(59, 130, 246, 0.1)',
+                  pointerEvents: 'none',
+                  zIndex: 1000,
+                }}
+              />
+            )}
           
           {/* DragOverlay pour le feedback visuel */}
           {activeField && (
@@ -2054,7 +2980,7 @@ export default function EditTemplatePage() {
               Sélectionnez un champ pour lier le texte sélectionné
             </p>
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {bonType?.fields?.map((field) => (
+              {documentType?.fields?.map((field) => (
                 <Button
                   key={field.id}
                   variant="outline"
@@ -2099,6 +3025,20 @@ export default function EditTemplatePage() {
                 />
               </div>
             </div>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="with-header"
+                  checked={tableWithHeader}
+                  onChange={(e) => setTableWithHeader(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="with-header" className="text-sm font-normal cursor-pointer">
+                  Avec en-tête
+                </Label>
+              </div>
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowTableDialog(false)}>
                 Annuler
@@ -2109,8 +3049,9 @@ export default function EditTemplatePage() {
                     editor.chain().focus().insertTable({
                       rows: tableRows,
                       cols: tableCols,
-                      withHeaderRow: true,
+                      withHeaderRow: tableWithHeader,
                     }).run()
+                    
                     setShowTableDialog(false)
                   }
                 }}
@@ -2160,6 +3101,126 @@ export default function EditTemplatePage() {
                 }}
               >
                 Appliquer
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog pour le conteneur Flex/Grid */}
+      <Dialog open={showLayoutDialog} onOpenChange={(open) => {
+        setShowLayoutDialog(open)
+        if (!open) {
+          setPlacementMode(null)
+          if (editor) editor.view.dom.style.cursor = ''
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Configurer un conteneur {layoutType === 'flex' ? 'Flexbox' : 'Grid'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Type de conteneur:</Label>
+              <Select value={layoutType} onValueChange={(value: 'flex' | 'grid') => setLayoutType(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="flex">Flexbox</SelectItem>
+                  <SelectItem value="grid">Grid</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>
+                {layoutType === 'grid' 
+                  ? 'Nombre d\'éléments (affichés horizontalement):' 
+                  : 'Nombre d\'éléments:'}
+              </Label>
+              <Input
+                type="number"
+                min="1"
+                max={layoutType === 'grid' ? '12' : '20'}
+                value={layoutItems}
+                onChange={(e) => setLayoutItems(parseInt(e.target.value) || 3)}
+              />
+              {layoutType === 'grid' && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Les éléments seront affichés côte à côte horizontalement
+                </p>
+              )}
+            </div>
+
+            {layoutType === 'flex' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Direction:</Label>
+                  <Select value={flexDirection} onValueChange={(value: 'row' | 'column') => setFlexDirection(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="row">Horizontal (row)</SelectItem>
+                      <SelectItem value="column">Vertical (column)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Justify Content (alignement horizontal):</Label>
+                  <Select value={justifyContent} onValueChange={setJustifyContent}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="flex-start">flex-start</SelectItem>
+                      <SelectItem value="flex-end">flex-end</SelectItem>
+                      <SelectItem value="center">center</SelectItem>
+                      <SelectItem value="space-between">space-between</SelectItem>
+                      <SelectItem value="space-around">space-around</SelectItem>
+                      <SelectItem value="space-evenly">space-evenly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Align Items (alignement vertical):</Label>
+                  <Select value={alignItems} onValueChange={setAlignItems}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="flex-start">flex-start</SelectItem>
+                      <SelectItem value="flex-end">flex-end</SelectItem>
+                      <SelectItem value="center">center</SelectItem>
+                      <SelectItem value="stretch">stretch</SelectItem>
+                      <SelectItem value="baseline">baseline</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button variant="outline" onClick={() => {
+                setShowLayoutDialog(false)
+                setPlacementMode(null)
+                if (editor) editor.view.dom.style.cursor = ''
+              }}>
+                Annuler
+              </Button>
+              <Button
+                onClick={() => {
+                  setPlacementMode(layoutType)
+                  setShowLayoutDialog(false)
+                  if (editor) {
+                    editor.view.dom.style.cursor = 'crosshair'
+                  }
+                }}
+              >
+                Placer dans le document
               </Button>
             </div>
           </div>

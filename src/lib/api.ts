@@ -32,21 +32,32 @@ export interface User {
   isActive: boolean
 }
 
-export interface Bon {
+export interface Document {
   id: string
-  bonNumber: string
-  bonTypeId: string
+  documentNumber: string
+  documentTypeId: string
   createdBy: string
   siteId?: string | null
   siteName?: string | null
   values: any // JSON string ou objet parsé
-  status: 'DRAFT' | 'SUBMITTED' | 'VALIDATED' | 'SIGNED' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'USED'
+  status: 'DRAFT' | 'SUBMITTED' | 'IN_PROGRESS' | 'VALIDATED' | 'SIGNED' | 'ACTIVE' | 'EXPIRED' | 'CANCELLED' | 'USED'
   version: number
-  bonType?: BonType
+  documentType?: DocumentType
   creator?: any
   approvers?: any[]
   signatures?: any[]
   scanLogs?: any[]
+  linkedDocuments?: Document[]
+  sourceLinks?: Array<{
+    id: string
+    linkType: string
+    targetDocument: Document
+  }>
+  targetLinks?: Array<{
+    id: string
+    linkType: string
+    sourceDocument: Document
+  }>
   createdAt?: string
   updatedAt?: string
   expirationDate?: string | null
@@ -57,11 +68,25 @@ export interface Bon {
   digitalSignatureData?: string | null
 }
 
-export interface BonType {
+export interface Category {
   id: string
   name: string
   code: string
   description?: string | null
+  color?: string | null
+  status: 'active' | 'inactive'
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface DocumentType {
+  id: string
+  name: string
+  code: string
+  description?: string | null
+  categoryId?: string | null
+  category?: Category | null // Relation préchargée
   formStructure?: string | any // String JSON côté backend, peut être parsé côté frontend
   workflowConfig?: string | any | null
   signatureConfig?: string | any | null
@@ -69,20 +94,20 @@ export interface BonType {
   qrConfig?: string | any | null
   status: 'active' | 'inactive'
   createdBy: string
-  fields?: BonField[] // Relation préchargée (champs simples, hors groupes)
-  fieldGroups?: BonFieldGroup[] // Relation préchargée (groupes de champs)
+  fields?: DocumentField[] // Relation préchargée (champs simples, hors groupes)
+  fieldGroups?: DocumentFieldGroup[] // Relation préchargée (groupes de champs)
   workflows?: any[]
   createdAt?: string
   updatedAt?: string
 }
 
-export interface BonField {
+export interface DocumentField {
   id: string
-  bonTypeId: string
-  bonFieldGroupId?: string | null // null = champ simple (hors groupe), défini = appartient à un groupe
+  documentTypeId: string
+  documentFieldGroupId?: string | null // null = champ simple (hors groupe), défini = appartient à un groupe
   name: string
   label: string
-  type: 'text' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox'
+  type: 'text' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox' | 'textarea' | 'file' | 'document_link'
   required: boolean
   validationRules?: string | any | null
   options?: string | any | null // JSON string pour select
@@ -91,9 +116,9 @@ export interface BonField {
   updatedAt?: string
 }
 
-export interface BonFieldGroup {
+export interface DocumentFieldGroup {
   id: string
-  bonTypeId: string
+  documentTypeId: string
   name: string // Nom technique du groupe (ex: "invoice_line")
   label: string // Label affiché (ex: "Ligne de facture")
   description?: string | null
@@ -101,7 +126,7 @@ export interface BonFieldGroup {
   order: number
   minRepeats?: number | null // Nombre minimum de répétitions (si repeatable)
   maxRepeats?: number | null // Nombre maximum de répétitions (si repeatable)
-  fields?: BonField[] // Champs du groupe (relation préchargée)
+  fields?: DocumentField[] // Champs du groupe (relation préchargée)
   createdAt?: string
   updatedAt?: string
 }
@@ -341,18 +366,18 @@ class ApiClient {
     })
   }
 
-  // ==================== BONS ====================
+  // ==================== DOCUMENTS ====================
 
   /**
-   * Récupérer la liste des bons (avec pagination)
+   * Récupérer la liste des documents (avec pagination)
    */
-  async getBons(params?: {
+  async getDocuments(params?: {
     page?: number
     limit?: number
     status?: string
-    bonTypeId?: string | number
+    documentTypeId?: string | number
   }): Promise<{
-    data: Bon[]
+    data: Document[]
     meta: {
       total: number
       perPage: number
@@ -365,11 +390,11 @@ class ApiClient {
     if (params?.page) queryParams.append('page', params.page.toString())
     if (params?.limit) queryParams.append('limit', params.limit.toString())
     if (params?.status) queryParams.append('status', params.status)
-    if (params?.bonTypeId) queryParams.append('bonTypeId', params.bonTypeId.toString())
+    if (params?.documentTypeId) queryParams.append('documentTypeId', params.documentTypeId.toString())
 
     const query = queryParams.toString()
     const response = await this.request<{
-      data: Bon[]
+      data: Document[]
       meta: {
         total: number
         perPage: number
@@ -377,70 +402,71 @@ class ApiClient {
         lastPage: number
         firstPage: number
       }
-    }>(`/bons${query ? `?${query}` : ''}`)
+    }>(`/documents${query ? `?${query}` : ''}`)
     
-    // Parser values pour chaque bon si c'est une string JSON
-    response.data = response.data.map(bon => {
-      if (bon.values && typeof bon.values === 'string') {
+    // Parser values pour chaque document si c'est une string JSON
+    response.data = response.data.map(document => {
+      if (document.values && typeof document.values === 'string') {
         try {
-          bon.values = JSON.parse(bon.values)
+          document.values = JSON.parse(document.values)
         } catch (e) {
-          console.error('Error parsing bon values:', e)
-          bon.values = {}
+          console.error('Error parsing document values:', e)
+          document.values = {}
         }
       }
-      return bon
+      return document
     })
     
     return response
   }
 
   /**
-   * Récupérer un bon par son ID
+   * Récupérer un document par son ID
    */
-  async getBon(id: string | number): Promise<Bon> {
-    const bon = await this.request<Bon>(`/bons/${id}`)
+  async getDocument(id: string | number): Promise<Document> {
+    const document = await this.request<Document>(`/documents/${id}`)
     // Parser values si c'est une string JSON
-    if (bon.values && typeof bon.values === 'string') {
+    if (document.values && typeof document.values === 'string') {
       try {
-        bon.values = JSON.parse(bon.values)
+        document.values = JSON.parse(document.values)
       } catch (e) {
-        console.error('Error parsing bon values:', e)
-        bon.values = {}
+        console.error('Error parsing document values:', e)
+        document.values = {}
       }
     }
-    return bon
+    return document
   }
 
   /**
-   * Créer un nouveau bon
+   * Créer un nouveau document
    */
-  async createBon(data: {
-    bonTypeId: string | number
+  async createDocument(data: {
+    documentTypeId: string | number
     siteId?: string
     siteName?: string
     values: any
-  }): Promise<Bon> {
-    return this.request<Bon>('/bons', {
+    signers?: Array<{ userId: string; order: number }>
+  }): Promise<Document> {
+    return this.request<Document>('/documents', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
   /**
-   * Mettre à jour un bon
+   * Mettre à jour un document
    */
-  async updateBon(id: string | number, data: Partial<Bon>): Promise<Bon> {
-    return this.request<Bon>(`/bons/${id}`, {
+  async updateDocument(id: string | number, data: Partial<Document>): Promise<Document> {
+    return this.request<Document>(`/documents/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
   }
 
   /**
-   * Signer un bon
+   * Signer un document
    */
-  async signBon(id: string | number, data: {
+  async signDocument(id: string | number, data: {
     signatureMethod?: string
     otpCode?: string
     signatureData?: any
@@ -449,16 +475,16 @@ class ApiClient {
     signatureId?: string // ID d'une signature sauvegardée
     signatureName?: string // Nom personnalisé pour génération depuis nom
   }): Promise<any> {
-    return this.request(`/bons/${id}/sign`, {
+    return this.request(`/documents/${id}/sign`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
   /**
-   * Ajouter des signataires à un bon avec leur ordre
+   * Ajouter des signataires à un document avec leur ordre
    */
-  async addBonSigners(id: string | number, signers: Array<{
+  async addDocumentSigners(id: string | number, signers: Array<{
     userId: string
     order: number
   }>): Promise<{
@@ -472,16 +498,16 @@ class ApiClient {
       hasSigned: boolean
     }>
   }> {
-    return this.request(`/bons/${id}/signers`, {
+    return this.request(`/documents/${id}/signers`, {
       method: 'POST',
       body: JSON.stringify({ signers }),
     })
   }
 
   /**
-   * Récupérer les signataires d'un bon
+   * Récupérer les signataires d'un document
    */
-  async getBonSigners(id: string | number): Promise<{
+  async getDocumentSigners(id: string | number): Promise<{
     signers: Array<{
       id: string
       fullName: string
@@ -493,85 +519,214 @@ class ApiClient {
       signatureMethod?: string
     }>
   }> {
-    return this.request(`/bons/${id}/signers`)
+    return this.request(`/documents/${id}/signers`)
   }
 
   /**
-   * Approuver un bon
+   * Approuver un document
    */
-  async approveBon(id: string | number): Promise<any> {
-    return this.request(`/bons/${id}/approve`, {
+  async approveDocument(id: string | number): Promise<any> {
+    return this.request(`/documents/${id}/approve`, {
       method: 'POST',
     })
   }
 
   /**
-   * Rejeter un bon
+   * Rejeter un document
    */
-  async rejectBon(id: string | number, reason?: string): Promise<any> {
-    return this.request(`/bons/${id}/reject`, {
+  async rejectDocument(id: string | number, reason?: string): Promise<any> {
+    return this.request(`/documents/${id}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     })
   }
 
   /**
-   * Récupérer le PDF d'un bon (URL)
+   * Lier un document à un autre document
    */
-  getBonPDFUrl(id: string | number): string {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-    return `${this.baseURL}/bons/${id}/pdf?token=${token}`
-  }
-
-  /**
-   * Télécharger le PDF d'un bon
-   */
-  async downloadBonPDF(id: string | number): Promise<Blob> {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-    const response = await fetch(`${this.baseURL}/bons/${id}/pdf/download`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+  async linkDocument(id: string | number, data: {
+    targetDocumentId: string
+    linkType: string
+    linkMethod?: string
+    metadata?: any
+  }): Promise<any> {
+    return this.request(`/documents/${id}/link`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     })
-    if (!response.ok) throw new Error('Erreur lors du téléchargement')
-    return response.blob()
   }
 
-  // ==================== TYPES DE BONS ====================
+  /**
+   * Lier un document via QR code
+   */
+  async linkDocumentByQR(id: string | number, qrCode: string): Promise<any> {
+    return this.request(`/documents/${id}/link-by-qr`, {
+      method: 'POST',
+      body: JSON.stringify({ qrCode }),
+    })
+  }
 
   /**
-   * Récupérer la liste des types de bons
+   * Récupérer les documents liés
    */
-  async getBonTypes(): Promise<BonType[]> {
-    const bonTypes = await this.request<BonType[]>('/bon-types')
-    console.log('Raw bon types from API:', bonTypes)
+  async getLinkedDocuments(id: string | number): Promise<{
+    linkedDocuments: Document[]
+  }> {
+    return this.request(`/documents/${id}/linked`)
+  }
+
+  /**
+   * Délier un document
+   */
+  async unlinkDocument(id: string | number, linkId: string): Promise<any> {
+    return this.request(`/documents/${id}/link/${linkId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
+   * Récupérer le PDF d'un document (URL)
+   */
+  getDocumentPDFUrl(id: string | number): string {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    return `${this.baseURL}/documents/${id}/pdf?token=${token}`
+  }
+
+  /**
+   * Télécharger le PDF d'un document
+   */
+  async downloadDocumentPDF(id: string | number): Promise<Blob> {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+    if (!token) {
+      throw new Error('Token d\'authentification manquant')
+    }
+
+    try {
+      const response = await fetch(`${this.baseURL}/documents/${id}/pdf/download`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/pdf',
+        },
+      })
+
+      if (!response.ok) {
+        // Essayer de récupérer le message d'erreur du backend
+        let errorMessage = 'Erreur lors du téléchargement'
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.message || errorData.error || errorMessage
+        } catch {
+          // Si la réponse n'est pas du JSON, utiliser le statut
+          errorMessage = `Erreur ${response.status}: ${response.statusText}`
+        }
+        throw new Error(errorMessage)
+      }
+
+      // Vérifier que la réponse est bien un PDF
+      const contentType = response.headers.get('content-type')
+      if (contentType && !contentType.includes('application/pdf')) {
+        console.warn('Réponse inattendue:', contentType)
+      }
+
+      return await response.blob()
+    } catch (error: any) {
+      console.error('Error downloading PDF:', error)
+      if (error instanceof Error) {
+        throw error
+      }
+      throw new Error('Erreur lors du téléchargement du PDF')
+    }
+  }
+
+  // ==================== CATEGORIES ====================
+
+  /**
+   * Récupérer la liste des catégories
+   */
+  async getCategories(params?: { status?: string }): Promise<Category[]> {
+    const queryParams = new URLSearchParams()
+    if (params?.status) queryParams.append('status', params.status)
+
+    const query = queryParams.toString()
+    return this.request<Category[]>(`/categories${query ? `?${query}` : ''}`)
+  }
+
+  /**
+   * Récupérer une catégorie par son ID
+   */
+  async getCategory(id: string | number): Promise<Category> {
+    return this.request<Category>(`/categories/${id}`)
+  }
+
+  /**
+   * Créer une nouvelle catégorie
+   */
+  async createCategory(data: Partial<Category>): Promise<Category> {
+    return this.request<Category>('/categories', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Mettre à jour une catégorie
+   */
+  async updateCategory(id: string | number, data: Partial<Category>): Promise<Category> {
+    return this.request<Category>(`/categories/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Supprimer une catégorie
+   */
+  async deleteCategory(id: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/categories/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  // ==================== TYPES DE DOCUMENTS ====================
+
+  /**
+   * Récupérer la liste des types de documents
+   */
+  async getDocumentTypes(params?: { categoryId?: string }): Promise<DocumentType[]> {
+    const queryParams = new URLSearchParams()
+    if (params?.categoryId) queryParams.append('categoryId', params.categoryId)
+
+    const query = queryParams.toString()
+    const documentTypes = await this.request<DocumentType[]>(`/document-types${query ? `?${query}` : ''}`)
+    console.log('Raw document types from API:', documentTypes)
     
     // Parser formStructure si c'est une string JSON
-    return bonTypes.map(bt => {
-      console.log(`Processing bon type ${bt.id}:`, {
-        hasFields: !!bt.fields,
-        fieldsCount: bt.fields?.length || 0,
-        hasFormStructure: !!bt.formStructure,
-        formStructureType: typeof bt.formStructure
+    return documentTypes.map(dt => {
+      console.log(`Processing document type ${dt.id}:`, {
+        hasFields: !!dt.fields,
+        fieldsCount: dt.fields?.length || 0,
+        hasFormStructure: !!dt.formStructure,
+        formStructureType: typeof dt.formStructure
       })
       
-      if (bt.formStructure && typeof bt.formStructure === 'string') {
+      if (dt.formStructure && typeof dt.formStructure === 'string') {
         try {
-          bt.formStructure = JSON.parse(bt.formStructure)
+          dt.formStructure = JSON.parse(dt.formStructure)
         } catch (e) {
           console.error('Error parsing formStructure:', e)
-          bt.formStructure = { fields: [] }
+          dt.formStructure = { fields: [] }
         }
       }
       // Si pas de formStructure OU formStructure.fields est vide, mais qu'on a des fields (relation), créer formStructure
-      const hasFormStructureFields = bt.formStructure?.fields && bt.formStructure.fields.length > 0
-      const hasFields = bt.fields && bt.fields.length > 0
+      const hasFormStructureFields = dt.formStructure?.fields && dt.formStructure.fields.length > 0
+      const hasFields = dt.fields && dt.fields.length > 0
       
       if (!hasFormStructureFields && hasFields) {
-        console.log('Creating formStructure from fields for bon type:', bt.id, 'fields:', bt.fields)
-        bt.formStructure = {
-          ...(bt.formStructure || {}),
-          fields: (bt.fields || []).map((field: any) => {
+        console.log('Creating formStructure from fields for document type:', dt.id, 'fields:', dt.fields)
+        dt.formStructure = {
+          ...(dt.formStructure || {}),
+          fields: (dt.fields || []).map((field: any) => {
             // Parser les options pour les champs select
             let parsedOptions = undefined
             if (field.options) {
@@ -614,30 +769,30 @@ class ApiClient {
             }
           })
         }
-        console.log('Created formStructure:', bt.formStructure)
+        console.log('Created formStructure:', dt.formStructure)
       }
-      return bt
+      return dt
     })
   }
 
   /**
-   * Récupérer un type de bon par son ID
+   * Récupérer un type de document par son ID
    */
-  async getBonType(id: string | number): Promise<BonType> {
-    const bonType = await this.request<BonType>(`/bon-types/${id}`)
+  async getDocumentType(id: string | number): Promise<DocumentType> {
+    const documentType = await this.request<DocumentType>(`/document-types/${id}`)
     // Parser formStructure si c'est une string JSON
-    if (bonType.formStructure && typeof bonType.formStructure === 'string') {
+    if (documentType.formStructure && typeof documentType.formStructure === 'string') {
       try {
-        bonType.formStructure = JSON.parse(bonType.formStructure)
+        documentType.formStructure = JSON.parse(documentType.formStructure)
       } catch (e) {
         console.error('Error parsing formStructure:', e)
-        bonType.formStructure = { fields: [] }
+        documentType.formStructure = { fields: [] }
       }
     }
     // Si pas de formStructure mais des fields (relation), créer formStructure
-    if (!bonType.formStructure?.fields && bonType.fields && bonType.fields.length > 0) {
-      bonType.formStructure = {
-        fields: bonType.fields.map((field: any) => ({
+    if (!documentType.formStructure?.fields && documentType.fields && documentType.fields.length > 0) {
+      documentType.formStructure = {
+        fields: documentType.fields.map((field: any) => ({
           name: field.name,
           label: field.label,
           type: field.type,
@@ -649,34 +804,46 @@ class ApiClient {
         }))
       }
     }
-    return bonType
+    return documentType
   }
 
   /**
-   * Créer un nouveau type de bon
+   * Créer un nouveau type de document
    */
-  async createBonType(data: Partial<BonType>): Promise<BonType> {
-    return this.request<BonType>('/bon-types', {
+  async createDocumentType(data: Partial<DocumentType>): Promise<DocumentType> {
+    // S'assurer que categoryId est envoyé au lieu de category
+    const { category, ...restData } = data as any
+    const payload = {
+      ...restData,
+      categoryId: data.categoryId || null,
+    }
+    return this.request<DocumentType>('/document-types', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     })
   }
 
   /**
-   * Mettre à jour un type de bon
+   * Mettre à jour un type de document
    */
-  async updateBonType(id: string | number, data: Partial<BonType>): Promise<BonType> {
-    return this.request<BonType>(`/bon-types/${id}`, {
+  async updateDocumentType(id: string | number, data: Partial<DocumentType>): Promise<DocumentType> {
+    // S'assurer que categoryId est envoyé au lieu de category
+    const { category, ...restData } = data as any
+    const payload = {
+      ...restData,
+      categoryId: data.categoryId !== undefined ? data.categoryId : null,
+    }
+    return this.request<DocumentType>(`/document-types/${id}`, {
       method: 'PUT',
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     })
   }
 
   /**
-   * Supprimer un type de bon
+   * Supprimer un type de document
    */
-  async deleteBonType(id: string | number): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/bon-types/${id}`, {
+  async deleteDocumentType(id: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/document-types/${id}`, {
       method: 'DELETE',
     })
   }
@@ -684,33 +851,33 @@ class ApiClient {
   // ==================== TEMPLATES PDF ====================
 
   /**
-   * Récupérer le template PDF d'un type de bon
+   * Récupérer le template PDF d'un type de document
    */
-  async getTemplate(bonTypeId: string | number): Promise<PDFTemplate> {
-    return this.request<PDFTemplate>(`/bon-types/${bonTypeId}/pdf-template`)
+  async getTemplate(documentTypeId: string | number): Promise<PDFTemplate> {
+    return this.request<PDFTemplate>(`/document-types/${documentTypeId}/pdf-template`)
   }
 
   /**
-   * Sauvegarder le template PDF d'un type de bon
+   * Sauvegarder le template PDF d'un type de document
    */
-  async saveTemplate(bonTypeId: string | number, template: PDFTemplate): Promise<{
+  async saveTemplate(documentTypeId: string | number, template: PDFTemplate): Promise<{
     message: string
     template: PDFTemplate
   }> {
-    return this.request(`/bon-types/${bonTypeId}/pdf-template`, {
+    return this.request(`/document-types/${documentTypeId}/pdf-template`, {
       method: 'POST',
       body: JSON.stringify(template),
     })
   }
 
   /**
-   * Créer un template par défaut pour un type de bon
+   * Créer un template par défaut pour un type de document
    */
-  async createDefaultTemplate(bonTypeId: string | number): Promise<{
+  async createDefaultTemplate(documentTypeId: string | number): Promise<{
     message: string
     template: PDFTemplate
   }> {
-    return this.request(`/bon-types/${bonTypeId}/pdf-template/default`, {
+    return this.request(`/document-types/${documentTypeId}/pdf-template/default`, {
       method: 'POST',
     })
   }
@@ -718,8 +885,8 @@ class ApiClient {
   /**
    * Prévisualiser un template
    */
-  async previewTemplate(bonTypeId: string | number, template: PDFTemplate): Promise<any> {
-    return this.request(`/bon-types/${bonTypeId}/pdf-template/preview`, {
+  async previewTemplate(documentTypeId: string | number, template: PDFTemplate): Promise<any> {
+    return this.request(`/document-types/${documentTypeId}/pdf-template/preview`, {
       method: 'POST',
       body: JSON.stringify(template),
     })
@@ -729,12 +896,12 @@ class ApiClient {
    * Dupliquer un template
    */
   async duplicateTemplate(
-    bonTypeId: string | number,
-    targetBonTypeId: string | number
+    documentTypeId: string | number,
+    targetDocumentTypeId: string | number
   ): Promise<any> {
-    return this.request(`/bon-types/${bonTypeId}/pdf-template/duplicate`, {
+    return this.request(`/document-types/${documentTypeId}/pdf-template/duplicate`, {
       method: 'POST',
-      body: JSON.stringify({ targetBonTypeId }),
+      body: JSON.stringify({ targetDocumentTypeId }),
     })
   }
 
@@ -783,6 +950,7 @@ class ApiClient {
     email?: string
     isActive?: boolean
     role?: string
+    password?: string
   }): Promise<User> {
     return this.request<User>(`/users/${id}`, {
       method: 'PUT',
@@ -848,9 +1016,21 @@ class ApiClient {
   }
 
   /**
+   * Récupérer un rôle par son ID
+   */
+  async getRole(id: string | number): Promise<any> {
+    return this.request<any>(`/roles/${id}`)
+  }
+
+  /**
    * Créer un nouveau rôle
    */
-  async createRole(data: any): Promise<any> {
+  async createRole(data: {
+    name: string
+    code: string
+    description?: string
+    permissionIds?: (string | number)[]
+  }): Promise<any> {
     return this.request('/roles', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -858,29 +1038,145 @@ class ApiClient {
   }
 
   /**
+   * Mettre à jour un rôle
+   */
+  async updateRole(id: string | number, data: {
+    name?: string
+    description?: string
+    isActive?: boolean
+    permissionIds?: (string | number)[]
+  }): Promise<any> {
+    return this.request(`/roles/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Supprimer un rôle
+   */
+  async deleteRole(id: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/roles/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
+   * Attacher des permissions à un rôle
+   */
+  async attachRolePermissions(id: string | number, permissionIds: (string | number)[]): Promise<any> {
+    return this.request(`/roles/${id}/permissions/attach`, {
+      method: 'POST',
+      body: JSON.stringify({ permissionIds }),
+    })
+  }
+
+  /**
+   * Détacher des permissions d'un rôle
+   */
+  async detachRolePermissions(id: string | number, permissionIds: (string | number)[]): Promise<any> {
+    return this.request(`/roles/${id}/permissions/detach`, {
+      method: 'POST',
+      body: JSON.stringify({ permissionIds }),
+    })
+  }
+
+  /**
    * Récupérer la liste des permissions
    */
-  async getPermissions(): Promise<any[]> {
-    return this.request<any[]>('/permissions')
+  async getPermissions(params?: {
+    resource?: string
+    action?: string
+    documentTypeId?: string | number
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    if (params?.resource) queryParams.append('resource', params.resource)
+    if (params?.action) queryParams.append('action', params.action)
+    if (params?.documentTypeId) queryParams.append('documentTypeId', params.documentTypeId.toString())
+
+    const query = queryParams.toString()
+    return this.request<any[]>(`/permissions${query ? `?${query}` : ''}`)
+  }
+
+  /**
+   * Récupérer les permissions groupées par ressource
+   */
+  async getPermissionsByResource(): Promise<Record<string, any[]>> {
+    return this.request<Record<string, any[]>>('/permissions/by-resource')
+  }
+
+  /**
+   * Récupérer une permission par son ID
+   */
+  async getPermission(id: string | number): Promise<any> {
+    return this.request<any>(`/permissions/${id}`)
   }
 
   /**
    * Créer une nouvelle permission
    */
-  async createPermission(data: any): Promise<any> {
+  async createPermission(data: {
+    name: string
+    code: string
+    description?: string
+    resource?: string
+    action: string
+    documentTypeId?: string | number
+  }): Promise<any> {
     return this.request('/permissions', {
       method: 'POST',
       body: JSON.stringify(data),
     })
   }
 
-  // ==================== CHAMPS DE BON ====================
+  /**
+   * Mettre à jour une permission
+   */
+  async updatePermission(id: string | number, data: {
+    name?: string
+    description?: string
+    resource?: string
+    action?: string
+    documentTypeId?: string | number
+  }): Promise<any> {
+    return this.request(`/permissions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
 
   /**
-   * Récupérer tous les champs d'un type de bon
+   * Supprimer une permission
    */
-  async getBonFields(bonTypeId: string | number): Promise<BonField[]> {
-    const fields = await this.request<BonField[]>(`/bon-types/${bonTypeId}/fields`)
+  async deletePermission(id: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/permissions/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
+   * Créer un utilisateur
+   */
+  async createUser(data: {
+    email: string
+    password: string
+    fullName?: string
+    role?: string
+    roleIds?: (string | number)[]
+  }): Promise<User> {
+    return this.request<User>('/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  // ==================== CHAMPS DE DOCUMENT ====================
+
+  /**
+   * Récupérer tous les champs d'un type de document
+   */
+  async getDocumentFields(documentTypeId: string | number): Promise<DocumentField[]> {
+    const fields = await this.request<DocumentField[]>(`/document-types/${documentTypeId}/fields`)
     // Parser options et validationRules si ce sont des strings JSON
     return fields.map(field => {
       if (field.options && typeof field.options === 'string') {
@@ -902,10 +1198,10 @@ class ApiClient {
   }
 
   /**
-   * Créer un nouveau champ pour un type de bon
+   * Créer un nouveau champ pour un type de document
    */
-  async createBonField(bonTypeId: string | number, data: Partial<BonField>): Promise<BonField> {
-    return this.request<BonField>(`/bon-types/${bonTypeId}/fields`, {
+  async createDocumentField(documentTypeId: string | number, data: Partial<DocumentField>): Promise<DocumentField> {
+    return this.request<DocumentField>(`/document-types/${documentTypeId}/fields`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -914,12 +1210,12 @@ class ApiClient {
   /**
    * Mettre à jour un champ
    */
-  async updateBonField(
-    bonTypeId: string | number,
+  async updateDocumentField(
+    documentTypeId: string | number,
     fieldId: string | number,
-    data: Partial<BonField>
-  ): Promise<BonField> {
-    return this.request<BonField>(`/bon-types/${bonTypeId}/fields/${fieldId}`, {
+    data: Partial<DocumentField>
+  ): Promise<DocumentField> {
+    return this.request<DocumentField>(`/document-types/${documentTypeId}/fields/${fieldId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
@@ -928,8 +1224,8 @@ class ApiClient {
   /**
    * Supprimer un champ
    */
-  async deleteBonField(bonTypeId: string | number, fieldId: string | number): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/bon-types/${bonTypeId}/fields/${fieldId}`, {
+  async deleteDocumentField(documentTypeId: string | number, fieldId: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/document-types/${documentTypeId}/fields/${fieldId}`, {
       method: 'DELETE',
     })
   }
@@ -937,10 +1233,10 @@ class ApiClient {
   // ==================== GROUPES DE CHAMPS ====================
 
   /**
-   * Récupérer tous les groupes de champs d'un type de bon
+   * Récupérer tous les groupes de champs d'un type de document
    */
-  async getBonFieldGroups(bonTypeId: string | number): Promise<BonFieldGroup[]> {
-    const groups = await this.request<BonFieldGroup[]>(`/bon-types/${bonTypeId}/field-groups`)
+  async getDocumentFieldGroups(documentTypeId: string | number): Promise<DocumentFieldGroup[]> {
+    const groups = await this.request<DocumentFieldGroup[]>(`/document-types/${documentTypeId}/field-groups`)
     // Parser les fields de chaque groupe
     return groups.map(group => {
       if (group.fields) {
@@ -969,15 +1265,15 @@ class ApiClient {
   /**
    * Récupérer un groupe de champs par son ID
    */
-  async getBonFieldGroup(bonTypeId: string | number, groupId: string | number): Promise<BonFieldGroup> {
-    return this.request<BonFieldGroup>(`/bon-types/${bonTypeId}/field-groups/${groupId}`)
+  async getDocumentFieldGroup(documentTypeId: string | number, groupId: string | number): Promise<DocumentFieldGroup> {
+    return this.request<DocumentFieldGroup>(`/document-types/${documentTypeId}/field-groups/${groupId}`)
   }
 
   /**
    * Créer un nouveau groupe de champs
    */
-  async createBonFieldGroup(bonTypeId: string | number, data: Partial<BonFieldGroup>): Promise<BonFieldGroup> {
-    return this.request<BonFieldGroup>(`/bon-types/${bonTypeId}/field-groups`, {
+  async createDocumentFieldGroup(documentTypeId: string | number, data: Partial<DocumentFieldGroup>): Promise<DocumentFieldGroup> {
+    return this.request<DocumentFieldGroup>(`/document-types/${documentTypeId}/field-groups`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
@@ -986,12 +1282,12 @@ class ApiClient {
   /**
    * Mettre à jour un groupe de champs
    */
-  async updateBonFieldGroup(
-    bonTypeId: string | number,
+  async updateDocumentFieldGroup(
+    documentTypeId: string | number,
     groupId: string | number,
-    data: Partial<BonFieldGroup>
-  ): Promise<BonFieldGroup> {
-    return this.request<BonFieldGroup>(`/bon-types/${bonTypeId}/field-groups/${groupId}`, {
+    data: Partial<DocumentFieldGroup>
+  ): Promise<DocumentFieldGroup> {
+    return this.request<DocumentFieldGroup>(`/document-types/${documentTypeId}/field-groups/${groupId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
@@ -1000,8 +1296,8 @@ class ApiClient {
   /**
    * Supprimer un groupe de champs
    */
-  async deleteBonFieldGroup(bonTypeId: string | number, groupId: string | number): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/bon-types/${bonTypeId}/field-groups/${groupId}`, {
+  async deleteDocumentFieldGroup(documentTypeId: string | number, groupId: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/document-types/${documentTypeId}/field-groups/${groupId}`, {
       method: 'DELETE',
     })
   }

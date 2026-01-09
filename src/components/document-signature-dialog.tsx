@@ -12,10 +12,10 @@ import { Loader2, Pen, Type, Upload, CheckCircle2, ExternalLink } from 'lucide-r
 import { api } from '@/lib/api'
 import { useToast } from '@/hooks/use-toast'
 
-interface BonSignatureDialogProps {
+interface DocumentSignatureDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  bonId: string
+  documentId: string
   onSuccess?: () => void
 }
 
@@ -27,7 +27,7 @@ interface SavedSignature {
   createdAt: string
 }
 
-export function BonSignatureDialog({ open, onOpenChange, bonId, onSuccess }: BonSignatureDialogProps) {
+export function DocumentSignatureDialog({ open, onOpenChange, documentId, onSuccess }: DocumentSignatureDialogProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [consentGiven, setConsentGiven] = useState(false)
@@ -273,11 +273,11 @@ export function BonSignatureDialog({ open, onOpenChange, bonId, onSuccess }: Bon
         signData.signatureName = name
       }
 
-      await api.signBon(bonId, signData)
+      await api.signDocument(documentId, signData)
 
       toast({
         title: 'Succès',
-        description: 'Bon signé avec succès',
+        description: 'Document signé avec succès',
       })
 
       onOpenChange(false)
@@ -285,10 +285,10 @@ export function BonSignatureDialog({ open, onOpenChange, bonId, onSuccess }: Bon
         onSuccess()
       }
     } catch (error: any) {
-      console.error('Error signing bon:', error)
+      console.error('Error signing document:', error)
       toast({
         title: 'Erreur',
-        description: error.message || 'Impossible de signer le bon',
+        description: error.message || 'Impossible de signer le document',
         variant: 'destructive',
       })
     } finally {
@@ -300,7 +300,7 @@ export function BonSignatureDialog({ open, onOpenChange, bonId, onSuccess }: Bon
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Signer le bon</DialogTitle>
+          <DialogTitle>Signer le document</DialogTitle>
           <DialogDescription>
             Choisissez votre méthode de signature préférée
           </DialogDescription>

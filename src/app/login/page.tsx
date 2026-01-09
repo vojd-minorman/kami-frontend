@@ -70,7 +70,7 @@ export default function LoginPage() {
 
           <div className="text-center mb-8 space-y-2">
             <h1 className="text-3xl font-bold tracking-tight text-foreground">{t.auth.login}</h1>
-            <p className="text-muted-foreground text-sm">Kami Operation - Plateforme de Bons Numériques</p>
+            <p className="text-muted-foreground text-sm">Kas Mining - Plateforme de Documents Numériques</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -215,7 +215,7 @@ export default function LoginPage() {
       </Card>
 
       <div className="absolute bottom-6 left-0 right-0 text-center text-sm text-muted-foreground">
-        © 2026 Kami Operation. Tous droits réservés.
+        © 2026 Kas Mining. Tous droits réservés.
       </div>
     </div>
   )

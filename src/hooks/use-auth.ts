@@ -34,6 +34,8 @@ export function useAuth(): UseAuthReturn {
 
       // Récupérer l'utilisateur depuis l'API
       const userData = await api.getMe()
+      console.log('[useAuth] Données utilisateur reçues:', userData)
+      console.log('[useAuth] Rôles de l\'utilisateur:', userData.roles)
       setUser(userData)
 
       // Mettre à jour localStorage avec les données fraîches

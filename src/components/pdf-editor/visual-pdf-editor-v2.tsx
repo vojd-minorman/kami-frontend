@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
-import { PDFTemplate, PDFTemplateSection, BonType, BonField } from '@/lib/api'
+import { PDFTemplate, PDFTemplateSection, DocumentType, DocumentField } from '@/lib/api'
 // import { ElementsPalette } from './elements-palette' // TODO: Create elements-palette component
 import { CanvasArea } from './canvas-area'
 // import { PropertiesPanel } from './properties-palette' // TODO: Create properties-panel component
@@ -15,14 +15,14 @@ import { Maximize2, Minimize2, X } from 'lucide-react'
 interface VisualPDFEditorV2Props {
   template: PDFTemplate
   onTemplateChange: (template: PDFTemplate) => void
-  bonType?: BonType | null
-  availableFields?: BonField[]
+  documentType?: DocumentType | null
+  availableFields?: DocumentField[]
 }
 
 export function VisualPDFEditorV2({ 
   template, 
   onTemplateChange,
-  bonType,
+  documentType,
   availableFields = []
 }: VisualPDFEditorV2Props) {
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null)
@@ -119,10 +119,10 @@ export function VisualPDFEditorV2({
         <div className="border-b bg-muted/30 px-4 py-2 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold">
-              {bonType?.name || 'Template PDF'}
+              {documentType?.name || 'Template PDF'}
             </h2>
             <p className="text-xs text-muted-foreground">
-              {template.sections?.length || 0} section(s) • {bonType?.code || 'N/A'}
+              {template.sections?.length || 0} section(s) • {documentType?.code || 'N/A'}
             </p>
           </div>
           <Button

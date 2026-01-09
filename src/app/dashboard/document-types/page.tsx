@@ -13,9 +13,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Edit, Trash2, Eye, Loader2 } from 'lucide-react'
+import { Plus, Edit, Trash2, Eye, Loader2, Filter } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
 import { PermissionGuard } from '@/components/permission-guard'
@@ -29,6 +36,7 @@ export default function DocumentTypesPage() {
   const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | number | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string>('')
 
   useEffect(() => {
     if (user) {
@@ -47,6 +55,20 @@ export default function DocumentTypesPage() {
       setLoading(false)
     }
   }
+
+  // Obtenir toutes les catégories uniques
+  const categories = Array.from(
+    new Map(
+      documentTypes
+        .filter(dt => dt.category)
+        .map(dt => [dt.category!.id, dt.category!])
+    ).values()
+  )
+  
+  // Filtrer les types de documents par catégorie
+  const filteredDocumentTypes = selectedCategory
+    ? documentTypes.filter(dt => dt.category?.id === selectedCategory)
+    : documentTypes
 
   const handleDelete = async (id: string | number) => {
     if (!confirm('Êtes-vous sûr de vouloir supprimer ce type de document ? Cette action est irréversible.')) {
@@ -96,10 +118,34 @@ export default function DocumentTypesPage() {
         {/* Document Types List */}
         <Card className="border-border/50">
           <CardHeader>
-            <CardTitle className="text-lg md:text-xl">Liste des types de documents</CardTitle>
-            <CardDescription className="text-sm">
-              {documentTypes.length > 0 ? `${documentTypes.length} type(s) de document trouvé(s)` : 'Aucun type de document'}
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="text-lg md:text-xl">Liste des types de documents</CardTitle>
+                <CardDescription className="text-sm">
+                  {filteredDocumentTypes.length > 0 
+                    ? `${filteredDocumentTypes.length} type(s) de document trouvé(s)${selectedCategory ? ` dans la catégorie "${categories.find(c => c.id === selectedCategory)?.name || ''}"` : ''}` 
+                    : 'Aucun type de document'}
+                </CardDescription>
+              </div>
+              {categories.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-muted-foreground" />
+                  <Select value={selectedCategory || 'all'} onValueChange={(value) => setSelectedCategory(value === 'all' ? '' : value)}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Toutes les catégories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Toutes les catégories</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -111,7 +157,7 @@ export default function DocumentTypesPage() {
                   </div>
                 ))}
               </div>
-            ) : documentTypes.length === 0 ? (
+            ) : filteredDocumentTypes.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground mb-4">
                   Aucun type de document trouvé
@@ -131,16 +177,26 @@ export default function DocumentTypesPage() {
                     <TableRow>
                       <TableHead className="min-w-[200px]">Nom</TableHead>
                       <TableHead className="min-w-[100px]">Code</TableHead>
+                      <TableHead className="min-w-[150px]">Catégorie</TableHead>
                       <TableHead className="min-w-[200px]">Description</TableHead>
                       <TableHead className="min-w-[100px]">Statut</TableHead>
                       <TableHead className="text-right min-w-[200px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {documentTypes.map((documentType) => (
+                    {filteredDocumentTypes.map((documentType) => (
                       <TableRow key={documentType.id}>
                         <TableCell className="font-medium">{documentType.name}</TableCell>
                         <TableCell className="font-mono text-sm">{documentType.code}</TableCell>
+                        <TableCell>
+                          {documentType.category ? (
+                            <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20">
+                              {documentType.category.name}
+                            </Badge>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {documentType.description || 'Aucune description'}
                         </TableCell>

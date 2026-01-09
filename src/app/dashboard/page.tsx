@@ -6,7 +6,7 @@ import { useLocale } from "@/contexts/locale-context"
 import { Ticket, TrendingUp, DollarSign, Activity } from "lucide-react"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { useAuth } from "@/hooks/use-auth"
-import { api, type Bon } from "@/lib/api"
+import { api, type Document } from "@/lib/api"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 
@@ -14,7 +14,7 @@ export default function DashboardPage() {
   const { t } = useLocale()
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
-  const [bons, setBons] = useState<Bon[]>([])
+  const [documents, setDocuments] = useState<Document[]>([])
   const [stats, setStats] = useState({
     total: 0,
     pending: 0,
@@ -23,35 +23,35 @@ export default function DashboardPage() {
   })
 
   useEffect(() => {
-    const loadBons = async () => {
+    const loadDocuments = async () => {
       try {
         setLoading(true)
-        const response = await api.getBons({ page: 1, limit: 100 })
-        setBons(response.data)
+        const response = await api.getDocuments({ page: 1, limit: 100 })
+        setDocuments(response.data)
         
         // Calculer les statistiques
         const statsData = {
           total: response.meta.total,
-          pending: response.data.filter(b => b.status === 'DRAFT' || b.status === 'SUBMITTED').length,
-          approved: response.data.filter(b => b.status === 'VALIDATED' || b.status === 'SIGNED' || b.status === 'ACTIVE').length,
-          rejected: response.data.filter(b => b.status === 'CANCELLED').length,
+          pending: response.data.filter(d => d.status === 'DRAFT' || d.status === 'SUBMITTED').length,
+          approved: response.data.filter(d => d.status === 'VALIDATED' || d.status === 'SIGNED' || d.status === 'ACTIVE').length,
+          rejected: response.data.filter(d => d.status === 'CANCELLED').length,
         }
         setStats(statsData)
       } catch (error) {
-        console.error("Erreur lors du chargement des bons:", error)
+        console.error("Erreur lors du chargement des documents:", error)
       } finally {
         setLoading(false)
       }
     }
 
     if (user) {
-      loadBons()
+      loadDocuments()
     }
   }, [user])
 
   const statsCards = [
     {
-      title: "Total des Bons",
+      title: "Total des Documents",
       value: stats.total.toLocaleString(),
       change: "",
       icon: Ticket,
@@ -101,7 +101,7 @@ export default function DashboardPage() {
       <div className="space-y-6 md:space-y-8 animate-fade-in">
       <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">{t.dashboard.title}</h1>
-          <p className="text-muted-foreground mt-2 text-sm md:text-base">Vue d'ensemble de votre plateforme de bons numériques</p>
+          <p className="text-muted-foreground mt-2 text-sm md:text-base">Vue d'ensemble de votre plateforme de documents numériques</p>
       </div>
 
         {loading ? (
@@ -148,8 +148,8 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
           <Card className="col-span-full lg:col-span-4 border-border/50">
           <CardHeader>
-              <CardTitle className="text-lg md:text-xl">Bons Récents</CardTitle>
-              <CardDescription className="text-sm">Les derniers bons créés sur la plateforme</CardDescription>
+              <CardTitle className="text-lg md:text-xl">Documents Récents</CardTitle>
+              <CardDescription className="text-sm">Les derniers documents créés sur la plateforme</CardDescription>
           </CardHeader>
             <CardContent>
               {loading ? (
@@ -165,31 +165,31 @@ export default function DashboardPage() {
                     </div>
                   ))}
                 </div>
-              ) : bons.length === 0 ? (
+              ) : documents.length === 0 ? (
                 <div className="h-[200px] flex items-center justify-center text-muted-foreground">
                   <div className="text-center space-y-2">
                     <Ticket className="h-12 w-12 mx-auto opacity-50" />
-                    <p className="text-sm">Aucun bon pour le moment</p>
+                    <p className="text-sm">Aucun document pour le moment</p>
             </div>
             </div>
               ) : (
                 <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                  {bons.slice(0, 10).map((bon) => (
+                  {documents.slice(0, 10).map((document) => (
                     <div
-                      key={bon.id}
+                      key={document.id}
                       className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-3 rounded-lg border border-border/50 hover:bg-accent/50 transition-colors"
                     >
                       <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-1.5 sm:mt-0" />
                       <div className="flex-1 space-y-1 min-w-0">
                         <p className="text-sm font-medium leading-none truncate">
-                          {bon.bonNumber || `Bon #${bon.id}`}
+                          {document.documentNumber || `Document #${document.id}`}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {bon.bonType?.name || "Type inconnu"} • {bon.siteName || "Site non spécifié"}
+                          {document.documentType?.name || "Type inconnu"} • {document.siteName || "Site non spécifié"}
                         </p>
-                        {bon.createdAt && (
+                        {document.createdAt && (
                           <p className="text-xs text-muted-foreground">
-                            {new Date(bon.createdAt).toLocaleDateString("fr-FR", {
+                            {new Date(document.createdAt).toLocaleDateString("fr-FR", {
                               day: "numeric",
                               month: "short",
                               year: "numeric",
@@ -199,7 +199,7 @@ export default function DashboardPage() {
                           </p>
                         )}
             </div>
-                      <div className="flex-shrink-0">{getStatusBadge(bon.status)}</div>
+                      <div className="flex-shrink-0">{getStatusBadge(document.status)}</div>
             </div>
                   ))}
             </div>

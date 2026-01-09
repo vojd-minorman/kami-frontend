@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useLocale } from '@/contexts/locale-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,50 +14,49 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Edit, Trash2, Eye, Loader2 } from 'lucide-react'
+import { Plus, Edit, Trash2, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
 import { PermissionGuard } from '@/components/permission-guard'
-import { api, type DocumentType } from '@/lib/api'
+import { api, type Category } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 
-export default function DocumentTypesPage() {
+export default function CategoriesPage() {
   const router = useRouter()
-  const { t } = useLocale()
   const { user } = useAuth()
-  const [documentTypes, setDocumentTypes] = useState<DocumentType[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
-  const [deleting, setDeleting] = useState<string | number | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
     if (user) {
-      loadDocumentTypes()
+      loadCategories()
     }
   }, [user])
 
-  const loadDocumentTypes = async () => {
+  const loadCategories = async () => {
     try {
       setLoading(true)
-      const types = await api.getDocumentTypes()
-      setDocumentTypes(types)
+      const cats = await api.getCategories({ status: 'active' })
+      setCategories(cats)
     } catch (error) {
-      console.error('Error loading document types:', error)
+      console.error('Error loading categories:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDelete = async (id: string | number) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce type de document ? Cette action est irréversible.')) {
+  const handleDelete = async (id: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette catégorie ? Cette action est irréversible.')) {
       return
     }
 
     try {
       setDeleting(id)
-      await api.deleteDocumentType(id)
-      await loadDocumentTypes()
+      await api.deleteCategory(id)
+      await loadCategories()
     } catch (error: any) {
-      console.error('Error deleting document type:', error)
+      console.error('Error deleting category:', error)
       alert(error.message || 'Erreur lors de la suppression')
     } finally {
       setDeleting(null)
@@ -73,32 +71,32 @@ export default function DocumentTypesPage() {
   }
 
   return (
-    <PermissionGuard permission="document_type.read">
+    <PermissionGuard permission="category.read">
       <DashboardShell>
-      <div className="space-y-4 md:space-y-6">
+        <div className="space-y-4 md:space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Types de documents</h1>
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Catégories</h1>
             <p className="text-muted-foreground text-sm md:text-base mt-1">
-              Gérez les types de documents disponibles dans le système
+              Gérez les catégories pour organiser vos types de documents
             </p>
           </div>
           <Button 
             className="w-full sm:w-auto"
-            onClick={() => router.push('/dashboard/document-types/create')}
+            onClick={() => router.push('/dashboard/categories/create')}
           >
             <Plus className="mr-2 h-4 w-4" />
-            Créer un type de document
+            Créer une catégorie
           </Button>
         </div>
 
-        {/* Document Types List */}
+        {/* Categories List */}
         <Card className="border-border/50">
           <CardHeader>
-            <CardTitle className="text-lg md:text-xl">Liste des types de documents</CardTitle>
+            <CardTitle className="text-lg md:text-xl">Liste des catégories</CardTitle>
             <CardDescription className="text-sm">
-              {documentTypes.length > 0 ? `${documentTypes.length} type(s) de document trouvé(s)` : 'Aucun type de document'}
+              {categories.length > 0 ? `${categories.length} catégorie(s) trouvée(s)` : 'Aucune catégorie'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -111,17 +109,17 @@ export default function DocumentTypesPage() {
                   </div>
                 ))}
               </div>
-            ) : documentTypes.length === 0 ? (
+            ) : categories.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground mb-4">
-                  Aucun type de document trouvé
+                  Aucune catégorie trouvée
                 </p>
                 <Button
-                  onClick={() => router.push('/dashboard/document-types/create')}
+                  onClick={() => router.push('/dashboard/categories/create')}
                   variant="outline"
                 >
                   <Plus className="mr-2 h-4 w-4" />
-                  Créer votre premier type de document
+                  Créer votre première catégorie
                 </Button>
               </div>
             ) : (
@@ -131,28 +129,37 @@ export default function DocumentTypesPage() {
                     <TableRow>
                       <TableHead className="min-w-[200px]">Nom</TableHead>
                       <TableHead className="min-w-[100px]">Code</TableHead>
+                      <TableHead className="min-w-[150px]">Couleur</TableHead>
                       <TableHead className="min-w-[200px]">Description</TableHead>
                       <TableHead className="min-w-[100px]">Statut</TableHead>
                       <TableHead className="text-right min-w-[200px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {documentTypes.map((documentType) => (
-                      <TableRow key={documentType.id}>
-                        <TableCell className="font-medium">{documentType.name}</TableCell>
-                        <TableCell className="font-mono text-sm">{documentType.code}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {documentType.description || 'Aucune description'}
+                    {categories.map((category) => (
+                      <TableRow key={category.id}>
+                        <TableCell className="font-medium">{category.name}</TableCell>
+                        <TableCell className="font-mono text-sm">{category.code}</TableCell>
+                        <TableCell>
+                          {category.color ? (
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-6 h-6 rounded border border-border"
+                                style={{ backgroundColor: category.color }}
+                              />
+                              <span className="text-sm font-mono">{category.color}</span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">-</span>
+                          )}
                         </TableCell>
-                        <TableCell>{getStatusBadge(documentType.status)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {category.description || 'Aucune description'}
+                        </TableCell>
+                        <TableCell>{getStatusBadge(category.status)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Link href={`/dashboard/templates/${documentType.id}/edit`}>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" title="Gérer le template">
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </Link>
-                            <Link href={`/dashboard/document-types/${documentType.id}/edit`}>
+                            <Link href={`/dashboard/categories/${category.id}/edit`}>
                               <Button variant="ghost" size="icon" className="h-8 w-8" title="Modifier">
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -161,11 +168,11 @@ export default function DocumentTypesPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(documentType.id)}
-                              disabled={deleting === documentType.id}
+                              onClick={() => handleDelete(category.id)}
+                              disabled={deleting === category.id}
                               title="Supprimer"
                             >
-                              {deleting === documentType.id ? (
+                              {deleting === category.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (
                                 <Trash2 className="h-4 w-4" />
@@ -181,9 +188,8 @@ export default function DocumentTypesPage() {
             )}
           </CardContent>
         </Card>
-      </div>
+        </div>
       </DashboardShell>
     </PermissionGuard>
   )
 }
-

@@ -5,7 +5,7 @@ export const translations = {
     // Navigation
     nav: {
       dashboard: 'Tableau de bord',
-      bons: 'Bons',
+      documents: 'Documents',
       configuration: 'Configuration',
       templates: 'Templates PDF',
       users: 'Utilisateurs',
@@ -31,20 +31,20 @@ export const translations = {
       title: 'Tableau de bord',
       welcome: 'Bienvenue',
       stats: {
-        totalBons: 'Total des bons',
-        activeBons: 'Bons actifs',
+        totalDocuments: 'Total des documents',
+        activeDocuments: 'Documents actifs',
         pendingApproval: 'En attente d\'approbation',
         signedToday: 'Signés aujourd\'hui',
       },
       recentActivity: 'Activité récente',
       quickActions: 'Actions rapides',
-      createBon: 'Créer un bon',
+      createDocument: 'Créer un document',
       viewAll: 'Voir tout',
     },
-    // Bons
-    bons: {
-      title: 'Bons',
-      create: 'Créer un bon',
+    // Documents
+    documents: {
+      title: 'Documents',
+      create: 'Créer un document',
       edit: 'Modifier',
       delete: 'Supprimer',
       view: 'Voir',
@@ -125,7 +125,7 @@ export const translations = {
     // Navigation
     nav: {
       dashboard: 'Dashboard',
-      bons: 'Permits',
+      documents: 'Documents',
       configuration: 'Configuration',
       templates: 'PDF Templates',
       users: 'Users',
@@ -151,20 +151,20 @@ export const translations = {
       title: 'Dashboard',
       welcome: 'Welcome',
       stats: {
-        totalBons: 'Total Permits',
-        activeBons: 'Active Permits',
+        totalDocuments: 'Total Documents',
+        activeDocuments: 'Active Documents',
         pendingApproval: 'Pending Approval',
         signedToday: 'Signed Today',
       },
       recentActivity: 'Recent Activity',
       quickActions: 'Quick Actions',
-      createBon: 'Create Permit',
+      createDocument: 'Create Document',
       viewAll: 'View All',
     },
-    // Bons
-    bons: {
-      title: 'Permits',
-      create: 'Create Permit',
+    // Documents
+    documents: {
+      title: 'Documents',
+      create: 'Create Document',
       edit: 'Edit',
       delete: 'Delete',
       view: 'View',

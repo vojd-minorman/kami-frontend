@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const settingsCards = [
     {
       title: 'Templates PDF',
-      description: 'Gérez les templates PDF pour vos types de bons',
+      description: 'Gérez les templates PDF pour vos types de documents',
       icon: FileText,
       href: '/dashboard/templates',
       color: 'text-blue-500',
@@ -30,10 +30,10 @@ export default function SettingsPage() {
       bgColor: 'bg-green-500/10',
     },
     {
-      title: 'Types de bons',
-      description: 'Gérez les types de bons disponibles',
+      title: 'Types de documents',
+      description: 'Gérez les types de documents disponibles',
       icon: Ticket,
-      href: '/dashboard/bon-types',
+      href: '/dashboard/document-types',
       color: 'text-purple-500',
       bgColor: 'bg-purple-500/10',
     },

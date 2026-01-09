@@ -21,77 +21,90 @@ import {
   User,
   FileText,
   Users,
+  Link as LinkIcon,
+  ExternalLink,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type Bon, type BonType } from '@/lib/api'
+import { api, type Document, type DocumentType } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
-import { BonSignersDialog } from '@/components/bon-signers-dialog'
-import { BonSignatureDialog } from '@/components/bon-signature-dialog'
+import { DocumentSignersDialog } from '@/components/document-signers-dialog'
+import { DocumentSignatureDialog } from '@/components/document-signature-dialog'
 
 export default function VoucherDetailPage() {
   const router = useRouter()
   const params = useParams()
-  const bonId = params?.id as string
+  const documentId = params?.id as string
   const { t } = useLocale()
   const { user } = useAuth()
   
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
-  const [bon, setBon] = useState<Bon | null>(null)
-  const [bonType, setBonType] = useState<BonType | null>(null)
+  const [document, setDocument] = useState<Document | null>(null)
+  const [documentType, setDocumentType] = useState<DocumentType | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [signersDialogOpen, setSignersDialogOpen] = useState(false)
   const [signatureDialogOpen, setSignatureDialogOpen] = useState(false)
 
   useEffect(() => {
-    if (user && bonId) {
-      loadBon()
+    if (user && documentId) {
+      loadDocument()
     }
-  }, [user, bonId])
+  }, [user, documentId])
 
-  const loadBon = async () => {
+  const loadDocument = async () => {
     try {
       setLoading(true)
       setError(null)
-      const bonData = await api.getBon(bonId)
-      setBon(bonData)
+      const documentData = await api.getDocument(documentId)
       
-      // Le bonType est déjà préchargé avec fields et fieldGroups par le backend
-      if (bonData.bonType) {
-        setBonType(bonData.bonType)
-      } else if (bonData.bonTypeId) {
-        // Fallback: charger le type de bon si non préchargé
+      // Debug: Vérifier les données des approvers
+      if (documentData.approvers) {
+        console.log('[VoucherDetailPage] Approvers data:', documentData.approvers.map((a: any) => ({
+          id: a.id,
+          name: a.fullName || a.email,
+          extras: a.$extras,
+          hasSigned: a.$extras?.pivot_has_signed,
+        })))
+      }
+      
+      setDocument(documentData)
+      
+      // Le documentType est déjà préchargé avec fields et fieldGroups par le backend
+      if (documentData.documentType) {
+        setDocumentType(documentData.documentType)
+      } else if (documentData.documentTypeId) {
+        // Fallback: charger le type de document si non préchargé
         try {
-          const bonTypeData = await api.getBonType(bonData.bonTypeId)
-          setBonType(bonTypeData)
+          const documentTypeData = await api.getDocumentType(documentData.documentTypeId)
+          setDocumentType(documentTypeData)
         } catch (err) {
-          console.error('Error loading bon type:', err)
-          // Ne pas bloquer si le type de bon ne peut pas être chargé
+          console.error('Error loading document type:', err)
+          // Ne pas bloquer si le type de document ne peut pas être chargé
         }
       }
     } catch (err: any) {
-      console.error('Error loading bon:', err)
-      setError(err.message || 'Erreur lors du chargement du bon')
+      console.error('Error loading document:', err)
+      setError(err.message || 'Erreur lors du chargement du document')
     } finally {
       setLoading(false)
     }
   }
 
   const handleDownloadPDF = async () => {
-    if (!bon) return
+    if (!document) return
     try {
       setProcessing(true)
       // Le backend générera automatiquement le PDF s'il n'existe pas
-      const blob = await api.downloadBonPDF(bon.id)
+      const blob = await api.downloadDocumentPDF(document.id)
       const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
+      const a = window.document.createElement('a')
       a.href = url
-      a.download = `bon-${bon.bonNumber || bon.id}.pdf`
-      document.body.appendChild(a)
+      a.download = `document-${document.documentNumber || document.id}.pdf`
+      window.document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
+      window.document.body.removeChild(a)
     } catch (error: any) {
       console.error('Error downloading PDF:', error)
       const errorMessage = error?.message || 'Erreur lors du téléchargement du PDF'
@@ -101,33 +114,71 @@ export default function VoucherDetailPage() {
     }
   }
 
-  const handleApprove = async () => {
-    if (!bon) return
-    if (!confirm('Êtes-vous sûr de vouloir approuver ce bon ?')) return
+  // Vérifier si l'utilisateur a déjà signé ce document
+  const hasUserSigned = () => {
+    if (!document || !user || !document.approvers) return false
+    
+    const userApprover = document.approvers.find((a: any) => a.id === user.id)
+    if (!userApprover) return false
+    
+    const pivot = (userApprover as any).$extras || {}
+    return pivot.pivot_has_signed === true || 
+           pivot.has_signed === true || 
+           (typeof pivot.pivot_has_signed === 'boolean' && pivot.pivot_has_signed) ||
+           (typeof pivot.has_signed === 'boolean' && pivot.has_signed)
+  }
 
-    try {
-      setProcessing(true)
-      await api.approveBon(bon.id)
-      await loadBon() // Recharger les données
-    } catch (err: any) {
-      console.error('Error approving bon:', err)
-      alert(err.message || 'Erreur lors de l\'approbation')
-    } finally {
-      setProcessing(false)
+  // Vérifier si l'utilisateur peut signer ce document
+  const canUserSign = () => {
+    if (!document || !user) return false
+    
+    // Si l'utilisateur a déjà signé, il ne peut plus signer
+    if (hasUserSigned()) return false
+    
+    // Si le document est en SUBMITTED ou IN_PROGRESS, vérifier si l'utilisateur est dans les signataires
+    if ((document.status === 'SUBMITTED' || document.status === 'IN_PROGRESS') && document.approvers) {
+      const userApprover = document.approvers.find((a: any) => a.id === user.id)
+      if (!userApprover) return false
+      
+      // Vérifier si tous les signataires précédents ont signé
+      const pivot = (userApprover as any).$extras || {}
+      const userOrder = pivot.pivot_order ?? pivot.order ?? 999
+      const previousSigners = document.approvers.filter((a: any) => {
+        const aPivot = (a as any).$extras || {}
+        const aOrder = aPivot.pivot_order ?? aPivot.order ?? 999
+        return aOrder < userOrder
+      })
+      
+      const allPreviousSigned = previousSigners.every((a: any) => {
+        const aPivot = (a as any).$extras || {}
+        return aPivot.pivot_has_signed === true || 
+               aPivot.has_signed === true ||
+               (typeof aPivot.pivot_has_signed === 'boolean' && aPivot.pivot_has_signed) ||
+               (typeof aPivot.has_signed === 'boolean' && aPivot.has_signed)
+      })
+      
+      return allPreviousSigned
     }
+    
+    return false
+  }
+
+  const handleSign = async () => {
+    if (!document) return
+    setSignatureDialogOpen(true)
   }
 
   const handleReject = async () => {
-    if (!bon) return
+    if (!document) return
     const reason = prompt('Veuillez indiquer la raison du rejet :')
     if (!reason) return
 
     try {
       setProcessing(true)
-      await api.rejectBon(bon.id, reason)
-      await loadBon() // Recharger les données
+      await api.rejectDocument(document.id, reason)
+      await loadDocument() // Recharger les données
     } catch (err: any) {
-      console.error('Error rejecting bon:', err)
+      console.error('Error rejecting document:', err)
       alert(err.message || 'Erreur lors du rejet')
     } finally {
       setProcessing(false)
@@ -136,8 +187,19 @@ export default function VoucherDetailPage() {
 
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+      DRAFT: { label: "Brouillon", variant: "outline" },
+      SUBMITTED: { label: "Soumis - En attente de signature", variant: "secondary" },
+      IN_PROGRESS: { label: "En cours de signature", variant: "default" },
+      SIGNED: { label: "Signé", variant: "default" },
+      VALIDATED: { label: "Validé", variant: "default" },
+      ACTIVE: { label: "Actif", variant: "default" },
+      EXPIRED: { label: "Expiré", variant: "secondary" },
+      CANCELLED: { label: "Annulé", variant: "destructive" },
+      USED: { label: "Utilisé", variant: "secondary" },
+      // Anciens statuts pour compatibilité
       draft: { label: "Brouillon", variant: "outline" },
       pending: { label: "En attente", variant: "secondary" },
+      in_progress: { label: "En cours de signature", variant: "default" },
       signed: { label: "Signé", variant: "default" },
       approved: { label: "Approuvé", variant: "default" },
       rejected: { label: "Rejeté", variant: "destructive" },
@@ -171,7 +233,7 @@ export default function VoucherDetailPage() {
     )
   }
 
-  if (error || !bon) {
+  if (error || !document) {
     return (
       <DashboardShell>
         <div className="space-y-6">
@@ -189,7 +251,7 @@ export default function VoucherDetailPage() {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 text-destructive">
                 <AlertCircle className="h-5 w-5" />
-                <p>{error || 'Bon introuvable'}</p>
+                <p>{error || 'Document introuvable'}</p>
               </div>
             </CardContent>
           </Card>
@@ -211,10 +273,10 @@ export default function VoucherDetailPage() {
             </Link>
             <div>
               <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-                Bon #{bon.bonNumber || bon.id}
+                Document #{document.documentNumber || document.id}
               </h1>
               <p className="text-muted-foreground text-sm md:text-base mt-1">
-                {bon.bonType?.name || 'Type de bon inconnu'}
+                {document.documentType?.name || 'Type de document inconnu'}
               </p>
             </div>
           </div>
@@ -232,37 +294,50 @@ export default function VoucherDetailPage() {
               )}
               Télécharger PDF
             </Button>
-            {bon.status === 'SUBMITTED' && (
+            {(document.status === 'SUBMITTED' || document.status === 'IN_PROGRESS') && (
               <>
-                <Button
-                  variant="default"
-                  onClick={handleApprove}
-                  disabled={processing}
-                  className="flex-1 sm:flex-none"
-                >
-                  {processing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
+                {hasUserSigned() ? (
+                  <Button
+                    variant="outline"
+                    disabled
+                    className="flex-1 sm:flex-none"
+                  >
                     <CheckCircle2 className="mr-2 h-4 w-4" />
-                  )}
-                  Approuver
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleReject}
-                  disabled={processing}
-                  className="flex-1 sm:flex-none"
-                >
-                  {processing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <XCircle className="mr-2 h-4 w-4" />
-                  )}
-                  Rejeter
-                </Button>
+                    Déjà signé
+                  </Button>
+                ) : canUserSign() ? (
+                  <>
+                    <Button
+                      variant="default"
+                      onClick={handleSign}
+                      disabled={processing}
+                      className="flex-1 sm:flex-none"
+                    >
+                      {processing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FileSignature className="mr-2 h-4 w-4" />
+                      )}
+                      Signer
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={handleReject}
+                      disabled={processing}
+                      className="flex-1 sm:flex-none"
+                    >
+                      {processing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <XCircle className="mr-2 h-4 w-4" />
+                      )}
+                      Rejeter
+                    </Button>
+                  </>
+                ) : null}
               </>
             )}
-            {bon.status === 'DRAFT' && bon.createdBy === user?.id && (
+            {document.status === 'DRAFT' && document.createdBy === user?.id && (
               <>
                 <Button
                   variant="outline"
@@ -285,7 +360,7 @@ export default function VoucherDetailPage() {
               </>
             )}
             {/* Bouton pour signer si l'utilisateur est dans les signataires et peut signer */}
-            {bon.status === 'DRAFT' && bon.createdBy !== user?.id && (
+            {document.status === 'DRAFT' && document.createdBy !== user?.id && (
               <Button
                 variant="default"
                 onClick={() => setSignatureDialogOpen(true)}
@@ -302,7 +377,7 @@ export default function VoucherDetailPage() {
         {/* Status Badge */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Statut :</span>
-          {getStatusBadge(bon.status)}
+          {getStatusBadge(document.status)}
         </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -311,7 +386,7 @@ export default function VoucherDetailPage() {
             <CardHeader>
               <CardTitle className="text-lg md:text-xl flex items-center gap-2">
                 <FileText className="h-5 w-5" />
-                Informations du bon
+                Informations du document
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -322,7 +397,7 @@ export default function VoucherDetailPage() {
                     Créé par
                   </div>
                   <p className="font-medium">
-                    {bon.creator?.fullName || bon.creator?.email || 'N/A'}
+                    {document.creator?.fullName || document.creator?.email || 'N/A'}
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -330,7 +405,7 @@ export default function VoucherDetailPage() {
                     <MapPin className="h-4 w-4" />
                     Site
                   </div>
-                  <p className="font-medium">{bon.siteName || bon.siteId || 'N/A'}</p>
+                  <p className="font-medium">{document.siteName || document.siteId || 'N/A'}</p>
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -338,8 +413,8 @@ export default function VoucherDetailPage() {
                     Date de création
                   </div>
                   <p className="font-medium">
-                    {bon.createdAt
-                      ? new Date(bon.createdAt).toLocaleDateString('fr-FR', {
+                    {document.createdAt
+                      ? new Date(document.createdAt).toLocaleDateString('fr-FR', {
                           day: 'numeric',
                           month: 'long',
                           year: 'numeric',
@@ -355,8 +430,8 @@ export default function VoucherDetailPage() {
                     Dernière modification
                   </div>
                   <p className="font-medium">
-                    {bon.updatedAt
-                      ? new Date(bon.updatedAt).toLocaleDateString('fr-FR', {
+                    {document.updatedAt
+                      ? new Date(document.updatedAt).toLocaleDateString('fr-FR', {
                           day: 'numeric',
                           month: 'long',
                           year: 'numeric',
@@ -370,17 +445,17 @@ export default function VoucherDetailPage() {
 
               <Separator />
 
-              {/* Valeurs du bon */}
+              {/* Valeurs du document */}
               <div className="space-y-2">
-                <h3 className="font-semibold text-sm">Données du bon</h3>
-                {bon.values && Object.keys(bon.values).length > 0 ? (() => {
+                <h3 className="font-semibold text-sm">Données du document</h3>
+                {document.values && Object.keys(document.values).length > 0 ? (() => {
                   // Créer un mapping complet des champs (nom technique -> label + type)
                   const fieldMap = new Map<string, { label: string; type?: string }>()
                   
                   // Mapper les champs simples (hors groupes)
-                  if (bonType?.fields) {
-                    bonType.fields.forEach((field: any) => {
-                      if (!field.bonFieldGroupId) {
+                  if (documentType?.fields) {
+                    documentType.fields.forEach((field: any) => {
+                      if (!field.documentFieldGroupId) {
                         fieldMap.set(field.name, { 
                           label: field.label || field.name, 
                           type: field.type 
@@ -390,8 +465,8 @@ export default function VoucherDetailPage() {
                   }
                   
                   // Mapper les champs dans les groupes
-                  if (bonType?.fieldGroups) {
-                    bonType.fieldGroups.forEach((group: any) => {
+                  if (documentType?.fieldGroups) {
+                    documentType.fieldGroups.forEach((group: any) => {
                       if (group.fields && Array.isArray(group.fields)) {
                         group.fields.forEach((field: any) => {
                           fieldMap.set(field.name, { 
@@ -405,8 +480,8 @@ export default function VoucherDetailPage() {
                   
                   // Créer un mapping des groupes (nom technique -> label + propriétés)
                   const groupMap = new Map<string, { label: string; isRepeatable: boolean; fields?: any[]; order?: number }>()
-                  if (bonType?.fieldGroups) {
-                    bonType.fieldGroups.forEach((group: any) => {
+                  if (documentType?.fieldGroups) {
+                    documentType.fieldGroups.forEach((group: any) => {
                       groupMap.set(group.name, {
                         label: group.label || group.name,
                         isRepeatable: group.isRepeatable || false,
@@ -480,7 +555,7 @@ export default function VoucherDetailPage() {
                   const groupFields: Array<[string, any]> = []
                   const unmappedFields: Array<[string, any]> = []
                   
-                  Object.entries(bon.values).forEach(([key, value]) => {
+                  Object.entries(document.values).forEach(([key, value]) => {
                     if (groupMap.has(key)) {
                       groupFields.push([key, value])
                     } else if (fieldMap.has(key)) {
@@ -627,27 +702,85 @@ export default function VoucherDetailPage() {
             <CardContent className="space-y-4">
               <div className="space-y-3">
                 <div>
-                  <div className="text-xs text-muted-foreground mb-1">Type de bon</div>
-                  <div className="font-medium">{bon.bonType?.name || 'N/A'}</div>
+                  <div className="text-xs text-muted-foreground mb-1">Type de document</div>
+                  <div className="font-medium">{document.documentType?.name || 'N/A'}</div>
                 </div>
                 <Separator />
                 <div>
                   <div className="text-xs text-muted-foreground mb-1">Version</div>
-                  <div className="font-medium">v{bon.version || 1}</div>
+                  <div className="font-medium">v{document.version || 1}</div>
                 </div>
-                {bon.signatures && bon.signatures.length > 0 && (
+                {document.approvers && document.approvers.length > 0 && (
                   <>
                     <Separator />
                     <div>
-                      <div className="text-xs text-muted-foreground mb-2">Signatures</div>
+                      <div className="text-xs text-muted-foreground mb-2">Signataires</div>
                       <div className="space-y-2">
-                        {bon.signatures.map((signature: any, index: number) => (
+                        {document.approvers
+                          .sort((a: any, b: any) => {
+                            const orderA = (a as any).$extras?.pivot_order ?? (a as any).$extras?.order ?? 999
+                            const orderB = (b as any).$extras?.pivot_order ?? (b as any).$extras?.order ?? 999
+                            return orderA - orderB
+                          })
+                          .map((approver: any) => {
+                            // Essayer plusieurs formats pour la compatibilité
+                            const pivot = (approver as any).$extras || {}
+                            const hasSigned = pivot.pivot_has_signed === true || 
+                                             pivot.has_signed === true || 
+                                             (typeof pivot.pivot_has_signed === 'boolean' && pivot.pivot_has_signed) ||
+                                             (typeof pivot.has_signed === 'boolean' && pivot.has_signed)
+                            const order = pivot.pivot_order ?? pivot.order ?? 999
+                            const signedAt = pivot.pivot_signed_at ?? pivot.signed_at
+                            
+                            return (
+                              <div key={approver.id} className="flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">#{order}</span>
+                                  <span className="font-medium">{approver.fullName || approver.email}</span>
+                                  {hasSigned ? (
+                                    <Badge variant="default" className="text-xs">Signé</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs">En attente</Badge>
+                                  )}
+                                </div>
+                                {hasSigned && signedAt && (
+                                  <div className="text-xs text-muted-foreground">
+                                    {new Date(signedAt).toLocaleDateString('fr-FR', {
+                                      day: 'numeric',
+                                      month: 'short',
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  </>
+                )}
+                {document.signatures && document.signatures.length > 0 && (
+                  <>
+                    <Separator />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-2">Historique des signatures</div>
+                      <div className="space-y-2">
+                        {document.signatures.map((signature: any, index: number) => (
                           <div key={index} className="text-sm">
-                            <div className="font-medium">{signature.user?.fullName || 'N/A'}</div>
+                            <div className="font-medium">{signature.signer?.fullName || signature.signer?.email || 'N/A'}</div>
                             <div className="text-xs text-muted-foreground">
-                              {signature.createdAt
-                                ? new Date(signature.createdAt).toLocaleDateString('fr-FR')
+                              {signature.signedAt
+                                ? new Date(signature.signedAt).toLocaleDateString('fr-FR', {
+                                    day: 'numeric',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
                                 : ''}
+                              {signature.signatureMethod && ` • ${signature.signatureMethod}`}
                             </div>
                           </div>
                         ))}
@@ -658,26 +791,125 @@ export default function VoucherDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Liaisons de documents */}
+          {(document.sourceLinks && document.sourceLinks.length > 0) || (document.targetLinks && document.targetLinks.length > 0) ? (
+            <Card className="border-border/50">
+              <CardHeader>
+                <CardTitle className="text-lg md:text-xl flex items-center gap-2">
+                  <LinkIcon className="h-5 w-5" />
+                  Documents liés
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Documents associés à ce document
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Documents liés depuis ce document (sourceLinks) */}
+                {document.sourceLinks && document.sourceLinks.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-medium text-sm flex items-center gap-2">
+                      <ExternalLink className="h-4 w-4" />
+                      Documents liés depuis ce document
+                    </h4>
+                    <div className="space-y-2">
+                      {document.sourceLinks.map((link: any) => (
+                        <div
+                          key={link.id}
+                          className="p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <Link
+                                  href={`/dashboard/vouchers/${link.targetDocument?.id}`}
+                                  className="font-medium hover:underline flex items-center gap-2"
+                                >
+                                  {link.targetDocument?.documentNumber || 'N/A'}
+                                  <ExternalLink className="h-3 w-3" />
+                                </Link>
+                                <Badge variant="outline" className="text-xs">
+                                  {link.linkType || 'reference'}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {link.targetDocument?.documentType?.name || 'Type inconnu'}
+                                {link.targetDocument?.status && (
+                                  <> • {link.targetDocument.status}</>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Documents qui lient ce document (targetLinks) */}
+                {document.targetLinks && document.targetLinks.length > 0 && (
+                  <div className="space-y-2">
+                    {document.sourceLinks && document.sourceLinks.length > 0 && <Separator />}
+                    <h4 className="font-medium text-sm flex items-center gap-2">
+                      <LinkIcon className="h-4 w-4" />
+                      Documents qui lient ce document
+                    </h4>
+                    <div className="space-y-2">
+                      {document.targetLinks.map((link: any) => (
+                        <div
+                          key={link.id}
+                          className="p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <Link
+                                  href={`/dashboard/vouchers/${link.sourceDocument?.id}`}
+                                  className="font-medium hover:underline flex items-center gap-2"
+                                >
+                                  {link.sourceDocument?.documentNumber || 'N/A'}
+                                  <ExternalLink className="h-3 w-3" />
+                                </Link>
+                                <Badge variant="outline" className="text-xs">
+                                  {link.linkType || 'reference'}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {link.sourceDocument?.documentType?.name || 'Type inconnu'}
+                                {link.sourceDocument?.status && (
+                                  <> • {link.sourceDocument.status}</>
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
         </div>
 
         {/* Dialogs */}
-        {bon && (
+        {document && (
           <>
-            <BonSignersDialog
+            <DocumentSignersDialog
               open={signersDialogOpen}
               onOpenChange={setSignersDialogOpen}
-              bonId={bonId}
+              documentId={documentId}
               onSuccess={() => {
-                loadBon()
+                loadDocument()
                 setSignersDialogOpen(false)
               }}
             />
-            <BonSignatureDialog
+            <DocumentSignatureDialog
               open={signatureDialogOpen}
               onOpenChange={setSignatureDialogOpen}
-              bonId={bonId}
+              documentId={documentId}
               onSuccess={() => {
-                loadBon()
+                loadDocument()
                 setSignatureDialogOpen(false)
               }}
             />

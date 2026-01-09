@@ -6,8 +6,8 @@ import { LocaleProvider } from "@/contexts/locale-context"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "Kami Operation",
-  description: "Plateforme de Bons Numériques",
+  title: "Kas Mining",
+  description: "Plateforme de Documents Numériques",
   generator: "wonorogo.com",
   icons: {
     icon: [
