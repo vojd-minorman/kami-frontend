@@ -4,9 +4,10 @@ import { useLocale } from '@/contexts/locale-context'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/hooks/use-auth'
-import { Settings as SettingsIcon, Users, FileText, Globe, Shield, Ticket, Database } from 'lucide-react'
+import { Settings as SettingsIcon, Users, FileText, Globe, Shield, Ticket, Database, Bell, BellOff } from 'lucide-react'
 import Link from 'next/link'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { PushNotificationsSettings } from '@/components/push-notifications-settings'
 
 export default function SettingsPage() {
   const { t } = useLocale()
@@ -117,6 +118,9 @@ export default function SettingsPage() {
             )
           })}
         </div>
+
+        {/* Push Notifications Settings */}
+        <PushNotificationsSettings />
 
         {/* Info Card */}
         <Card className="border-border/50">

@@ -101,6 +101,39 @@ export default function UsersPage() {
     }
   }, [currentUser, currentPage, roleFilter])
 
+  // Écouter les événements WebSocket pour mettre à jour la liste des utilisateurs en temps réel
+  useEffect(() => {
+    if (!currentUser) return
+
+    const handleUserCreated = (event: CustomEvent) => {
+      console.log('👤 [Users] Événement user:created reçu:', event.detail)
+      // Recharger la liste des utilisateurs
+      loadUsers()
+    }
+
+    const handleUserUpdated = (event: CustomEvent) => {
+      console.log('👤 [Users] Événement user:updated reçu:', event.detail)
+      const updatedData = event.detail
+      // Mettre à jour l'utilisateur dans la liste
+      setUsers(prev => prev.map(u => 
+        u.id === updatedData.userId 
+          ? { ...u, ...updatedData }
+          : u
+      ))
+      // Rafraîchir pour avoir les données complètes
+      loadUsers()
+    }
+
+    // Écouter les événements personnalisés
+    window.addEventListener('user:created', handleUserCreated as EventListener)
+    window.addEventListener('user:updated', handleUserUpdated as EventListener)
+
+    return () => {
+      window.removeEventListener('user:created', handleUserCreated as EventListener)
+      window.removeEventListener('user:updated', handleUserUpdated as EventListener)
+    }
+  }, [currentUser])
+
   const loadUsers = async () => {
     try {
       setLoading(true)

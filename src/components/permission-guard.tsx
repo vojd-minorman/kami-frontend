@@ -1,11 +1,11 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
-import { usePermissions } from "@/hooks/use-permissions"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/hooks/use-toast"
+import { api } from "@/lib/api"
 
 interface PermissionGuardProps {
   children: React.ReactNode
@@ -19,7 +19,7 @@ interface PermissionGuardProps {
 
 /**
  * Composant de protection qui vérifie les permissions de l'utilisateur
- * Version simplifiée inspirée de SidebarItemGuard
+ * Utilise le backend pour vérifier les permissions (plus fiable)
  */
 export function PermissionGuard({ 
   children, 
@@ -32,63 +32,53 @@ export function PermissionGuard({
 }: PermissionGuardProps) {
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
-  const { hasPermission, hasAnyPermission, hasAllPermissions, isSuperAdmin, loading: permissionsLoading } = usePermissions()
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null)
+  const [checking, setChecking] = useState(false)
 
-  // Calculer hasAccess seulement quand tout est chargé
-  let hasAccess: boolean | null = null // null = en attente, true/false = décidé
+  // Vérifier les permissions via le backend
+  useEffect(() => {
+    if (authLoading || !user) {
+      setHasAccess(null)
+      return
+    }
 
-  // Ne calculer hasAccess que si tout est chargé
-  if (!authLoading && !permissionsLoading) {
-    if (!user) {
-      hasAccess = false
-    } else {
-      // Super admin a accès à tout - VÉRIFICATION PRIORITAIRE
-      // Passer user explicitement pour éviter les problèmes de timing
-      const isAdmin = isSuperAdmin(user)
-      
-      if (isAdmin) {
-        hasAccess = true
-      } else {
-        // Vérifier les permissions seulement si pas admin
-        if (permission) {
-          hasAccess = hasPermission(permission, documentTypeId)
-        } else if (permissions && permissions.length > 0) {
-          hasAccess = requireAll
-            ? hasAllPermissions(permissions, documentTypeId)
-            : hasAnyPermission(permissions, documentTypeId)
+    const checkPermission = async () => {
+      setChecking(true)
+      try {
+        const result = await api.checkPermission({
+          permission,
+          permissions,
+          documentTypeId,
+          requireAll,
+        })
+        setHasAccess(result.hasAccess)
+      } catch (error: any) {
+        // Si erreur 401/403, pas d'accès
+        if (error?.status === 401 || error?.status === 403) {
+          setHasAccess(false)
         } else {
-          // Si aucune permission spécifiée, autoriser l'accès
-          hasAccess = true
+          // Autre erreur, on considère qu'on n'a pas accès par sécurité
+          console.error('Error checking permission:', error)
+          setHasAccess(false)
         }
+      } finally {
+        setChecking(false)
       }
     }
-  }
 
-  // TOUS les hooks doivent être appelés AVANT tous les returns conditionnels
+    checkPermission()
+  }, [user, authLoading, permission, permissions, documentTypeId, requireAll])
+
   // Redirection si non authentifié
   useEffect(() => {
-    if (!authLoading && !permissionsLoading && !user) {
+    if (!authLoading && !user) {
       router.push("/login")
     }
-  }, [user, authLoading, permissionsLoading, router])
+  }, [user, authLoading, router])
 
   // Redirection si pas d'accès avec toast
   useEffect(() => {
-    // Ne rediriger que si on a fini de charger ET qu'on est sûr qu'il n'y a pas accès
-    // IMPORTANT: Ne pas appeler isSuperAdmin() si user n'est pas encore chargé
-    // On se base uniquement sur hasAccess qui a déjà été calculé correctement
-    if (authLoading || permissionsLoading || !user || hasAccess === null || hasAccess === true) {
-      // Ne rien faire si on est en train de charger, pas d'utilisateur, ou accès autorisé
-      return
-    }
-    
-    // Si on arrive ici, hasAccess === false et tout est chargé
-    // On vérifie une dernière fois qu'on n'est pas admin (sécurité supplémentaire)
-    // Passer user explicitement pour éviter les problèmes de timing
-    const isAdmin = isSuperAdmin(user)
-    
-    if (!isAdmin && redirectTo) {
-      // Afficher un toast pour informer l'utilisateur
+    if (!authLoading && !checking && user && hasAccess === false) {
       toast({
         variant: "destructive",
         title: "Accès refusé",
@@ -98,16 +88,12 @@ export function PermissionGuard({
           ? `Vous n'avez pas les permissions nécessaires pour accéder à cette page.`
           : "Vous n'avez pas les permissions nécessaires pour accéder à cette page.",
       })
-      
-      // Rediriger immédiatement
       router.push(redirectTo)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, permissionsLoading, user, hasAccess, redirectTo, router, permission, permissions])
+  }, [authLoading, checking, user, hasAccess, redirectTo, router, permission, permissions])
 
-  // MAINTENANT on peut faire les returns conditionnels
-  // Afficher le loading pendant le chargement OU si on n'a pas encore déterminé l'accès
-  if (authLoading || permissionsLoading || hasAccess === null) {
+  // Afficher le loading pendant le chargement OU si on vérifie les permissions
+  if (authLoading || checking || hasAccess === null) {
     return (
       fallback || (
         <div className="min-h-screen flex items-center justify-center">
@@ -121,27 +107,13 @@ export function PermissionGuard({
     )
   }
 
-  // Si pas d'utilisateur, ne rien afficher
+  // Si pas d'utilisateur, ne rien afficher (redirection gérée par useEffect)
   if (!user) {
     return null
   }
 
-  // Super admin a accès à tout - vérification prioritaire (comme dans SidebarItemGuard)
-  // DOUBLE VÉRIFICATION pour être sûr
-  // Passer user explicitement pour éviter les problèmes de timing
-  const isAdmin = isSuperAdmin(user)
-  
-  if (isAdmin) {
-    return <>{children}</>
-  }
-
-  // Si pas d'accès ET qu'on n'est pas admin, ne rien afficher (le toast et la redirection sont gérés par le useEffect)
+  // Si pas d'accès, ne rien afficher (toast et redirection gérés par useEffect)
   if (hasAccess === false) {
-    // Double vérification : si on est admin, on ne devrait jamais arriver ici
-    // Passer user explicitement pour éviter les problèmes de timing
-    if (isSuperAdmin(user)) {
-      return <>{children}</>
-    }
     return null
   }
 

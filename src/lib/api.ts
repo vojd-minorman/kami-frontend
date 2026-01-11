@@ -61,7 +61,8 @@ export interface Document {
   createdAt?: string
   updatedAt?: string
   expirationDate?: string | null
-  qrCode?: string | null
+  qrCode?: string | null // Data URL du QR code
+  qrCodeUrl?: string | null // URL publique de l'image du QR code
   qrToken?: string | null
   pdfUrl?: string | null
   pdfHash?: string | null
@@ -107,10 +108,10 @@ export interface DocumentField {
   documentFieldGroupId?: string | null // null = champ simple (hors groupe), défini = appartient à un groupe
   name: string
   label: string
-  type: 'text' | 'number' | 'date' | 'datetime' | 'select' | 'checkbox' | 'textarea' | 'file' | 'document_link'
+  type: 'text' | 'number' | 'date' | 'datetime' | 'time' | 'select' | 'checkbox' | 'yesno' | 'textarea' | 'file' | 'image' | 'image_multiple' | 'document_link'
   required: boolean
   validationRules?: string | any | null
-  options?: string | any | null // JSON string pour select
+  options?: string | any | null // JSON string pour select, yesno, image, image_multiple
   order: number
   createdAt?: string
   updatedAt?: string
@@ -127,6 +128,17 @@ export interface DocumentFieldGroup {
   minRepeats?: number | null // Nombre minimum de répétitions (si repeatable)
   maxRepeats?: number | null // Nombre maximum de répétitions (si repeatable)
   fields?: DocumentField[] // Champs du groupe (relation préchargée)
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface DocumentWorkflow {
+  id: string
+  documentTypeId: string
+  order: number
+  roleRequired: string | null
+  action: 'validate' | 'sign' | 'approve' | 'review'
+  isMandatory: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -250,6 +262,24 @@ export interface PDFTemplate {
   updatedAt?: string
 }
 
+/**
+ * Interface pour un modèle de template PDF (modèle de base de données)
+ */
+export interface PDFTemplateModel {
+  id: string
+  documentTypeId: string
+  name: string
+  description: string | null
+  isDefault: boolean
+  isActive: boolean
+  templateData: PDFTemplate | string
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+  documentType?: DocumentType
+  creator?: User
+}
+
 class ApiClient {
   private baseURL: string
 
@@ -262,12 +292,17 @@ class ApiClient {
    */
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    isJson: boolean = true
   ): Promise<T> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
 
     const headersInit: HeadersInit = new Headers(options.headers)
-    headersInit.set('Content-Type', 'application/json')
+    
+    // Ne pas définir Content-Type pour FormData (le navigateur le fera automatiquement)
+    if (isJson && !(options.body instanceof FormData)) {
+      headersInit.set('Content-Type', 'application/json')
+    }
 
     if (token) {
       headersInit.set('Authorization', `Bearer ${token}`)
@@ -275,11 +310,37 @@ class ApiClient {
 
     const url = `${this.baseURL}${endpoint}`
     
+    // Convertir le body en JSON si c'est un objet et que isJson est true
+    let body = options.body
+    if (isJson && body && typeof body === 'object' && !(body instanceof FormData)) {
+      body = JSON.stringify(body)
+    }
+    
+    // Log pour les requêtes PUT vers /roles
+    if (endpoint.includes('/roles/') && options.method === 'PUT') {
+      console.log('[API.request] Envoi de la requête PUT vers:', url)
+      console.log('[API.request] Options:', {
+        method: options.method,
+        body: body,
+        headers: Object.fromEntries(headersInit.entries()),
+      })
+    }
+    
     try {
       const response = await fetch(url, {
         ...options,
+        body: body,
         headers: headersInit,
       })
+      
+      // Log pour les réponses PUT vers /roles
+      if (endpoint.includes('/roles/') && options.method === 'PUT') {
+        console.log('[API.request] Réponse reçue:', {
+          status: response.status,
+          statusText: response.statusText,
+          ok: response.ok,
+        })
+      }
 
       // Si 401, rediriger vers login
       if (response.status === 401) {
@@ -374,8 +435,11 @@ class ApiClient {
   async getDocuments(params?: {
     page?: number
     limit?: number
-    status?: string
-    documentTypeId?: string | number
+    status?: string | string[]
+    documentTypeId?: string | number | (string | number)[]
+    dateFrom?: string
+    dateTo?: string
+    search?: string
   }): Promise<{
     data: Document[]
     meta: {
@@ -389,8 +453,28 @@ class ApiClient {
     const queryParams = new URLSearchParams()
     if (params?.page) queryParams.append('page', params.page.toString())
     if (params?.limit) queryParams.append('limit', params.limit.toString())
-    if (params?.status) queryParams.append('status', params.status)
-    if (params?.documentTypeId) queryParams.append('documentTypeId', params.documentTypeId.toString())
+    
+    // Support pour status multiple (array) ou unique (string)
+    if (params?.status) {
+      if (Array.isArray(params.status)) {
+        params.status.forEach(s => queryParams.append('status[]', s))
+      } else {
+        queryParams.append('status', params.status)
+      }
+    }
+    
+    // Support pour documentTypeId multiple (array) ou unique (string/number)
+    if (params?.documentTypeId) {
+      if (Array.isArray(params.documentTypeId)) {
+        params.documentTypeId.forEach(id => queryParams.append('documentTypeId[]', id.toString()))
+      } else {
+        queryParams.append('documentTypeId', params.documentTypeId.toString())
+      }
+    }
+    
+    if (params?.dateFrom) queryParams.append('dateFrom', params.dateFrom)
+    if (params?.dateTo) queryParams.append('dateTo', params.dateTo)
+    if (params?.search) queryParams.append('search', params.search)
 
     const query = queryParams.toString()
     const response = await this.request<{
@@ -848,25 +932,95 @@ class ApiClient {
     })
   }
 
+  /**
+   * Importer un type de document depuis un fichier JSON
+   */
+  async importDocumentType(importData: any): Promise<DocumentType> {
+    return this.request<DocumentType>('/document-types/import', {
+      method: 'POST',
+      body: JSON.stringify(importData),
+    })
+  }
+
   // ==================== TEMPLATES PDF ====================
 
   /**
-   * Récupérer le template PDF d'un type de document
+   * Récupérer tous les templates d'un type de document
    */
-  async getTemplate(documentTypeId: string | number): Promise<PDFTemplate> {
-    return this.request<PDFTemplate>(`/document-types/${documentTypeId}/pdf-template`)
+  async getTemplates(documentTypeId: string | number): Promise<PDFTemplateModel[]> {
+    const templates = await this.request<PDFTemplateModel[]>(`/document-types/${documentTypeId}/pdf-templates`)
+    // Parser templateData si c'est une string
+    return templates.map(t => ({
+      ...t,
+      templateData: typeof t.templateData === 'string' ? JSON.parse(t.templateData) : t.templateData
+    }))
   }
 
   /**
-   * Sauvegarder le template PDF d'un type de document
+   * Récupérer tous les templates par défaut du système
    */
-  async saveTemplate(documentTypeId: string | number, template: PDFTemplate): Promise<{
+  async getDefaultTemplates(): Promise<PDFTemplateModel[]> {
+    const templates = await this.request<PDFTemplateModel[]>(`/pdf-templates/defaults`)
+    // Parser templateData si c'est une string
+    return templates.map(t => ({
+      ...t,
+      templateData: typeof t.templateData === 'string' ? JSON.parse(t.templateData) : t.templateData
+    }))
+  }
+
+  /**
+   * Récupérer le template actif d'un type de document (ou un template spécifique)
+   */
+  async getTemplate(documentTypeId: string | number, templateId?: string | number): Promise<PDFTemplate> {
+    const query = templateId ? `?templateId=${templateId}` : ''
+    return this.request<PDFTemplate>(`/document-types/${documentTypeId}/pdf-template${query}`)
+  }
+
+  /**
+   * Sauvegarder le template PDF d'un type de document (crée ou met à jour)
+   */
+  async saveTemplate(documentTypeId: string | number, template: PDFTemplate & { id?: string }): Promise<{
     message: string
-    template: PDFTemplate
+    template: PDFTemplateModel
   }> {
     return this.request(`/document-types/${documentTypeId}/pdf-template`, {
       method: 'POST',
       body: JSON.stringify(template),
+    })
+  }
+
+  /**
+   * Activer un template (et désactiver les autres)
+   */
+  async activateTemplate(documentTypeId: string | number, templateId: string | number): Promise<{
+    message: string
+  }> {
+    return this.request(`/document-types/${documentTypeId}/pdf-template/${templateId}/activate`, {
+      method: 'POST',
+    })
+  }
+
+  /**
+   * Lier un template existant à un DocumentType
+   */
+  async linkTemplate(documentTypeId: string | number, templateId: string | number, activate: boolean = false): Promise<{
+    message: string
+    template: PDFTemplateModel
+  }> {
+    return this.request(`/document-types/${documentTypeId}/pdf-template/link`, {
+      method: 'POST',
+      body: JSON.stringify({ templateId, activate }),
+    })
+  }
+
+  /**
+   * Supprimer un template
+   */
+  async deleteTemplate(documentTypeId: string | number, templateId: string | number): Promise<{
+    message: string
+  }> {
+    return this.request(`/document-types/${documentTypeId}/pdf-template/${templateId}`, {
+      method: 'DELETE',
     })
   }
 
@@ -1046,10 +1200,20 @@ class ApiClient {
     isActive?: boolean
     permissionIds?: (string | number)[]
   }): Promise<any> {
-    return this.request(`/roles/${id}`, {
+    console.log('[API.updateRole] Appel de updateRole:', {
+      roleId: id,
+      data,
+      permissionIds: data.permissionIds,
+      permissionIdsLength: data.permissionIds?.length,
+    })
+    
+    const result = await this.request(`/roles/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     })
+    
+    console.log('[API.updateRole] Réponse reçue:', result)
+    return result
   }
 
   /**
@@ -1103,6 +1267,21 @@ class ApiClient {
    */
   async getPermissionsByResource(): Promise<Record<string, any[]>> {
     return this.request<Record<string, any[]>>('/permissions/by-resource')
+  }
+
+  /**
+   * Vérifier si l'utilisateur a une permission (via le backend)
+   */
+  async checkPermission(params: {
+    permission?: string
+    permissions?: string[]
+    documentTypeId?: string
+    requireAll?: boolean
+  }): Promise<{ hasAccess: boolean; reason?: string }> {
+    return this.request<{ hasAccess: boolean; reason?: string }>('/permissions/check', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    })
   }
 
   /**
@@ -1298,6 +1477,55 @@ class ApiClient {
    */
   async deleteDocumentFieldGroup(documentTypeId: string | number, groupId: string | number): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/document-types/${documentTypeId}/field-groups/${groupId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  // ==================== DOCUMENT WORKFLOWS ====================
+
+  /**
+   * Récupérer tous les workflows d'un type de document
+   */
+  async getDocumentWorkflows(documentTypeId: string | number): Promise<DocumentWorkflow[]> {
+    return this.request<DocumentWorkflow[]>(`/document-types/${documentTypeId}/workflows`)
+  }
+
+  /**
+   * Récupérer un workflow par son ID
+   */
+  async getDocumentWorkflow(documentTypeId: string | number, workflowId: string | number): Promise<DocumentWorkflow> {
+    return this.request<DocumentWorkflow>(`/document-types/${documentTypeId}/workflows/${workflowId}`)
+  }
+
+  /**
+   * Créer un nouveau workflow
+   */
+  async createDocumentWorkflow(documentTypeId: string | number, data: Partial<DocumentWorkflow>): Promise<DocumentWorkflow> {
+    return this.request<DocumentWorkflow>(`/document-types/${documentTypeId}/workflows`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Mettre à jour un workflow
+   */
+  async updateDocumentWorkflow(
+    documentTypeId: string | number,
+    workflowId: string | number,
+    data: Partial<DocumentWorkflow>
+  ): Promise<DocumentWorkflow> {
+    return this.request<DocumentWorkflow>(`/document-types/${documentTypeId}/workflows/${workflowId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Supprimer un workflow
+   */
+  async deleteDocumentWorkflow(documentTypeId: string | number, workflowId: string | number): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/document-types/${documentTypeId}/workflows/${workflowId}`, {
       method: 'DELETE',
     })
   }
@@ -1605,6 +1833,277 @@ class ApiClient {
       body: JSON.stringify(options || {}),
     })
   }
+
+  // ==================== IMAGES UPLOAD ====================
+
+  /**
+   * Upload une seule image
+   */
+  async uploadImage(file: File): Promise<{ url: string }> {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    return this.request<{ url: string }>('/images/upload', {
+      method: 'POST',
+      body: formData,
+    }, false) // Pas de JSON.stringify pour FormData
+  }
+
+  /**
+   * Upload plusieurs images (pour image_multiple)
+   */
+  async uploadImages(files: File[]): Promise<{ urls: string[]; errors?: string[] }> {
+    const formData = new FormData()
+    files.forEach((file) => {
+      formData.append('files', file)
+    })
+
+    return this.request<{ urls: string[]; errors?: string[] }>('/images/upload-multiple', {
+      method: 'POST',
+      body: formData,
+    }, false) // Pas de JSON.stringify pour FormData
+  }
+
+  /**
+   * Récupère les informations complètes d'un document via son QR code (publique, sans auth)
+   */
+  async getQRInfo(token: string): Promise<{
+    valid: boolean
+    document: {
+      id: string
+      documentNumber: string
+      documentType: string
+      documentTypeCode: string | null
+      status: string
+      createdAt: string
+      createdBy: { id: string; name: string; email: string | null }
+      expirationDate: string | null
+      version: number
+    }
+    signature: {
+      isSigned: boolean
+      completionDate: string | null
+      signatories: Array<{
+        id: string
+        name: string
+        email: string | null
+        role: string
+        signedAt: string | null
+        signatureMethod: string | null
+        hasSigned: boolean
+      }>
+      signatureCount: number
+      totalSignatories: number
+    }
+    qrCode: {
+      token: string
+      generatedAt: string
+      expirationDate: string | null
+      isValid: boolean
+      isRevoked: boolean
+      isUsed: boolean
+    }
+    verification: {
+      verified: boolean
+      timestamp: string
+      integrity: string
+    }
+    linkInfo: {
+      documentId: string
+      documentNumber: string
+      documentTypeCode: string | null
+      canBeLinked: boolean
+    }
+  }> {
+    // Route publique, pas besoin d'auth
+    const response = await fetch(`${this.baseURL}/qr/${token}/info`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.message || 'Erreur lors de la récupération des informations du QR code')
+    }
+
+    return response.json()
+  }
+
+  // ==================== NOTIFICATIONS ====================
+
+  /**
+   * Récupérer toutes les notifications de l'utilisateur connecté
+   */
+  async getNotifications(params?: {
+    page?: number
+    limit?: number
+    unread?: 'true' | 'false'
+    type?: 'document' | 'document_type' | 'category' | 'user'
+  }): Promise<{
+    data: Notification[]
+    meta: {
+      total: number
+      perPage: number
+      currentPage: number
+      lastPage: number
+    }
+  }> {
+    const queryParams = new URLSearchParams()
+    if (params?.page) queryParams.append('page', params.page.toString())
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    if (params?.unread) queryParams.append('unread', params.unread)
+    if (params?.type) queryParams.append('type', params.type)
+
+    const query = queryParams.toString()
+    return this.request(`/notifications${query ? `?${query}` : ''}`)
+  }
+
+  /**
+   * Récupérer une notification spécifique
+   */
+  async getNotification(id: string): Promise<Notification> {
+    return this.request(`/notifications/${id}`)
+  }
+
+  /**
+   * Compter les notifications non lues
+   */
+  async getUnreadNotificationsCount(): Promise<{ count: number }> {
+    return this.request('/notifications/unread-count')
+  }
+
+  /**
+   * Marquer une notification comme lue
+   */
+  async markNotificationAsRead(id: string): Promise<{ message: string; data: Notification }> {
+    return this.request(`/notifications/${id}/read`, {
+      method: 'PATCH',
+    })
+  }
+
+  /**
+   * Marquer toutes les notifications comme lues
+   */
+  async markAllNotificationsAsRead(): Promise<{ message: string }> {
+    return this.request('/notifications/read-all', {
+      method: 'PATCH',
+    })
+  }
+
+  /**
+   * Supprimer une notification
+   */
+  async deleteNotification(id: string): Promise<{ message: string }> {
+    return this.request(`/notifications/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
+   * Supprimer toutes les notifications lues
+   */
+  async deleteReadNotifications(): Promise<{ message: string }> {
+    return this.request('/notifications/read/delete-all', {
+      method: 'DELETE',
+    })
+  }
+
+  // ==================== PUSH SUBSCRIPTIONS (Web Push Notifications) ====================
+
+  /**
+   * Obtenir la clé publique VAPID
+   */
+  async getVapidPublicKey(): Promise<{ publicKey: string }> {
+    return this.request('/push/vapid-public-key')
+  }
+
+  /**
+   * Récupérer toutes les subscriptions push de l'utilisateur connecté
+   */
+  async getPushSubscriptions(): Promise<{
+    data: PushSubscription[]
+    vapidPublicKey: string | null
+  }> {
+    return this.request('/push/subscriptions')
+  }
+
+  /**
+   * Enregistrer une nouvelle subscription push
+   */
+  async subscribeToPush(data: {
+    subscription: {
+      endpoint: string
+      keys: {
+        p256dh: string
+        auth: string
+      }
+    }
+    userAgent?: string | null
+    deviceInfo?: string | null
+  }): Promise<{ message: string; data: PushSubscription }> {
+    return this.request('/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Désactiver une subscription push
+   */
+  async unsubscribeFromPush(id: string): Promise<{ message: string; data: PushSubscription }> {
+    return this.request(`/push/unsubscribe/${id}`, {
+      method: 'POST',
+    })
+  }
+
+  /**
+   * Supprimer une subscription push
+   */
+  async deletePushSubscription(id: string): Promise<{ message: string }> {
+    return this.request(`/push/subscriptions/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  /**
+   * Tester l'envoi d'une notification push
+   */
+  async testPushNotification(): Promise<{ message: string }> {
+    return this.request('/push/test', {
+      method: 'POST',
+    })
+  }
+}
+
+export interface Notification {
+  id: string
+  userId: string
+  type: 'document' | 'document_type' | 'category' | 'user'
+  event: string
+  title: string
+  description: string
+  isRead: boolean
+  data: any | null
+  link: string | null
+  readAt: string | null
+  createdAt: string
+  updatedAt: string | null
+}
+
+export interface PushSubscription {
+  id: string
+  userId: string
+  endpoint: string
+  p256dh: string
+  auth: string
+  userAgent: string | null
+  deviceInfo: string | null
+  isActive: boolean
+  expiresAt: string | null
+  createdAt: string
+  updatedAt: string | null
 }
 
 // Export d'une instance unique du client API

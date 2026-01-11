@@ -1,7 +1,7 @@
 "use client"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers, FileSignature, Tag, Shield, Key, FolderTree } from "lucide-react"
+import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers, FileSignature, Tag, Shield, Key, FolderTree, Bell } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -46,19 +46,26 @@ export function AppSidebar() {
       permission: 'signature.read',
     },
     {
-      title: t.nav.users,
-      href: "/dashboard/users",
-      icon: Users,
-      permission: 'user.read',
+      title: "Notifications",
+      href: "/dashboard/notifications",
+      icon: Bell,
+      permission: undefined, // Toujours visible pour l'utilisateur connecté
     },
   ]
 
   const configItems = [
+
     {
       title: t.nav.configuration,
       href: "/dashboard/settings",
       icon: Settings,
       permission: undefined, // Toujours visible
+    },
+    {
+      title: t.nav.users,
+      href: "/dashboard/users",
+      icon: Users,
+      permission: 'user.read',
     },
     {
       title: "Types de documents",
@@ -77,12 +84,6 @@ export function AppSidebar() {
       href: "/dashboard/templates",
       icon: FileText,
       permission: 'template.read',
-    },
-    {
-      title: "Types de bons",
-      href: "/dashboard/bon-types",
-      icon: FolderTree,
-      permission: 'document_type.read', // Utilise la même permission que les types de documents
     },
     {
       title: "Rôles",

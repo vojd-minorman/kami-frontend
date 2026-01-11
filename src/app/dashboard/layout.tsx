@@ -11,6 +11,8 @@ import { UserNav } from "@/components/user-nav"
 import { NotificationsNav } from "@/components/notification-nav"
 import { useAuth } from "@/hooks/use-auth"
 import { Skeleton } from "@/components/ui/skeleton"
+import { WebSocketProvider } from "@/components/websocket-provider"
+import { Toaster } from "@/components/ui/toaster"
 
 function HeaderContent() {
   return (
@@ -96,18 +98,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <SidebarProvider defaultOpen>
-      
-      <AppSidebar />
-      <SidebarInset 
-        ref={contentRef}
-        className="flex flex-col h-screen overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-      >
-        <HeaderWrapper isScrolled={isScrolled} />
-        <div className="flex flex-1 flex-col gap-4 p-4 md:p-6 lg:p-8">
-          {children}
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+    <WebSocketProvider>
+      <SidebarProvider defaultOpen>
+        <AppSidebar />
+        <SidebarInset 
+          ref={contentRef}
+          className="flex flex-col h-screen overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        >
+          <HeaderWrapper isScrolled={isScrolled} />
+          <div className="flex flex-1 flex-col gap-4 p-4 md:p-6 lg:p-8">
+            {children}
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+      <Toaster />
+    </WebSocketProvider>
   )
 }

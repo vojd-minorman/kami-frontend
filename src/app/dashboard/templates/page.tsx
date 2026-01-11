@@ -19,6 +19,7 @@ import { Plus, Edit, Eye, CheckCircle2, XCircle, FileText, AlertCircle } from 'l
 import Link from 'next/link'
 import { api, type DocumentType, type PDFTemplate } from '@/lib/api'
 import { useAuth } from '@/hooks/use-auth'
+import { usePermissions } from '@/hooks/use-permissions'
 import { PermissionGuard } from '@/components/permission-guard'
 import { DashboardShell } from '@/components/dashboard-shell'
 
@@ -26,12 +27,14 @@ interface TemplateInfo {
   documentType: DocumentType
   hasTemplate: boolean
   template?: PDFTemplate
+  templatesCount?: number
 }
 
 export default function TemplatesPage() {
   const router = useRouter()
   const { t } = useLocale()
   const { user } = useAuth()
+  const { hasPermission } = usePermissions()
   const [templates, setTemplates] = useState<TemplateInfo[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -46,21 +49,24 @@ export default function TemplatesPage() {
       setLoading(true)
       const documentTypes = await api.getDocumentTypes()
       
-      // Pour chaque type de document, vérifier s'il a un template (en parallèle mais avec gestion d'erreur)
+      // Pour chaque type de document, vérifier s'il a des templates (en parallèle mais avec gestion d'erreur)
       const templatesInfo: TemplateInfo[] = await Promise.allSettled(
         documentTypes.map(async (documentType) => {
           try {
-            const template = await api.getTemplate(documentType.id)
+            const templates = await api.getTemplates(documentType.id)
+            const activeTemplate = templates.find(t => t.isActive)
             return {
               documentType,
-              hasTemplate: true,
-              template,
+              hasTemplate: templates.length > 0,
+              template: activeTemplate ? (typeof activeTemplate.templateData === 'string' ? JSON.parse(activeTemplate.templateData) : activeTemplate.templateData) : undefined,
+              templatesCount: templates.length,
             }
           } catch (error: any) {
-            // Si le template n'existe pas, on retourne hasTemplate: false
+            // Si les templates n'existent pas, on retourne hasTemplate: false
             return {
               documentType,
               hasTemplate: false,
+              templatesCount: 0,
             }
           }
         })
@@ -69,6 +75,7 @@ export default function TemplatesPage() {
           result.status === 'fulfilled' ? result.value : {
             documentType: documentTypes[results.indexOf(result)],
             hasTemplate: false,
+            templatesCount: 0,
           }
         )
       )
@@ -110,12 +117,14 @@ export default function TemplatesPage() {
               Gérez les templates PDF pour chaque type de document
             </p>
           </div>
-          <Link href="/dashboard/templates/create">
-            <Button className="w-full sm:w-auto">
-              <Plus className="mr-2 h-4 w-4" />
-              {t.templates.create || 'Créer un template'}
-            </Button>
-          </Link>
+          {hasPermission('template.create') && (
+            <Link href="/dashboard/templates/create">
+              <Button className="w-full sm:w-auto">
+                <Plus className="mr-2 h-4 w-4" />
+                {t.templates.create || 'Créer un template'}
+              </Button>
+            </Link>
+          )}
         </div>
 
         {/* Templates List */}
@@ -144,12 +153,14 @@ export default function TemplatesPage() {
                 <p className="text-muted-foreground mb-4">
                   Aucun type de document trouvé
                 </p>
-                <Link href="/dashboard/templates/create">
-                  <Button variant="outline">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Créer votre premier template
-                  </Button>
-                </Link>
+                {hasPermission('template.create') && (
+                  <Link href="/dashboard/templates/create">
+                    <Button variant="outline">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Créer votre premier template
+                    </Button>
+                  </Link>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -180,7 +191,14 @@ export default function TemplatesPage() {
                           {templateInfo.documentType.code}
                         </TableCell>
                         <TableCell>
-                          {getTemplateStatusBadge(templateInfo.hasTemplate)}
+                          <div className="flex flex-col gap-1">
+                            {getTemplateStatusBadge(templateInfo.hasTemplate)}
+                            {templateInfo.templatesCount !== undefined && templateInfo.templatesCount > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                {templateInfo.templatesCount} template(s)
+                              </span>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           {templateInfo.hasTemplate && templateInfo.template ? (
@@ -212,15 +230,15 @@ export default function TemplatesPage() {
                                 </Button>
                               </Link>
                             ) : (
-                              <Link href={`/dashboard/templates/${templateInfo.documentType.id}/edit`}>
+                              <Link href={`/dashboard/templates/${templateInfo.documentType.id}`}>
                                 <Button 
                                   variant={templateInfo.hasTemplate ? "default" : "outline"} 
                                   size="sm"
                                 >
                                   {templateInfo.hasTemplate ? (
                                     <>
-                                      <Edit className="h-4 w-4 mr-1" />
-                                      Modifier
+                                      <Eye className="h-4 w-4 mr-1" />
+                                      Gérer
                                     </>
                                   ) : (
                                     <>

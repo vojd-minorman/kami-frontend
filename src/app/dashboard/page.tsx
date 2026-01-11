@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useLocale } from "@/contexts/locale-context"
 import { Ticket, TrendingUp, DollarSign, Activity } from "lucide-react"
@@ -22,32 +22,89 @@ export default function DashboardPage() {
     rejected: 0,
   })
 
-  useEffect(() => {
-    const loadDocuments = async () => {
-      try {
-        setLoading(true)
-        const response = await api.getDocuments({ page: 1, limit: 100 })
-        setDocuments(response.data)
-        
-        // Calculer les statistiques
-        const statsData = {
-          total: response.meta.total,
-          pending: response.data.filter(d => d.status === 'DRAFT' || d.status === 'SUBMITTED').length,
-          approved: response.data.filter(d => d.status === 'VALIDATED' || d.status === 'SIGNED' || d.status === 'ACTIVE').length,
-          rejected: response.data.filter(d => d.status === 'CANCELLED').length,
-        }
-        setStats(statsData)
-      } catch (error) {
-        console.error("Erreur lors du chargement des documents:", error)
-      } finally {
-        setLoading(false)
+  const loadDocuments = useCallback(async () => {
+    try {
+      setLoading(true)
+      const response = await api.getDocuments({ page: 1, limit: 100 })
+      setDocuments(response.data)
+      
+      // Calculer les statistiques
+      const statsData = {
+        total: response.meta.total,
+        pending: response.data.filter(d => d.status === 'DRAFT' || d.status === 'SUBMITTED').length,
+        approved: response.data.filter(d => d.status === 'VALIDATED' || d.status === 'SIGNED' || d.status === 'ACTIVE').length,
+        rejected: response.data.filter(d => d.status === 'CANCELLED').length,
       }
+      setStats(statsData)
+    } catch (error) {
+      console.error("Erreur lors du chargement des documents:", error)
+    } finally {
+      setLoading(false)
     }
+  }, [])
 
+  useEffect(() => {
     if (user) {
       loadDocuments()
     }
-  }, [user])
+  }, [user, loadDocuments])
+
+  // Écouter les événements WebSocket pour mettre à jour le dashboard en temps réel
+  useEffect(() => {
+    if (!user) return
+
+    const handleDocumentCreated = (event: CustomEvent) => {
+      console.log('📄 [Dashboard] Événement document:created reçu:', event.detail)
+      // Rafraîchir la liste des documents
+      loadDocuments()
+    }
+
+    const handleDocumentSigned = (event: CustomEvent) => {
+      console.log('✍️ [Dashboard] Événement document:signed reçu:', event.detail)
+      // Rafraîchir la liste des documents
+      loadDocuments()
+    }
+
+    const handleDocumentStatusChanged = (event: CustomEvent) => {
+      console.log('📊 [Dashboard] Événement document:status_changed reçu:', event.detail)
+      // Rafraîchir la liste des documents
+      loadDocuments()
+    }
+
+    const handleDocumentUpdated = (event: CustomEvent) => {
+      console.log('🔄 [Dashboard] Événement document:updated reçu:', event.detail)
+      // Mettre à jour le document spécifique dans la liste
+      const updatedData = event.detail
+      setDocuments(prev => prev.map(doc => 
+        doc.id === updatedData.documentId 
+          ? { ...doc, ...updatedData }
+          : doc
+      ))
+      // Recalculer les stats
+      loadDocuments()
+    }
+
+    const handleDashboardUpdate = (event: CustomEvent) => {
+      console.log('📊 [Dashboard] Événement dashboard:update reçu:', event.detail)
+      // Rafraîchir les données du dashboard
+      loadDocuments()
+    }
+
+    // Écouter les événements personnalisés émis par le WebSocketProvider
+    window.addEventListener('document:created', handleDocumentCreated as EventListener)
+    window.addEventListener('document:signed', handleDocumentSigned as EventListener)
+    window.addEventListener('document:status_changed', handleDocumentStatusChanged as EventListener)
+    window.addEventListener('document:updated', handleDocumentUpdated as EventListener)
+    window.addEventListener('dashboard:update', handleDashboardUpdate as EventListener)
+
+    return () => {
+      window.removeEventListener('document:created', handleDocumentCreated as EventListener)
+      window.removeEventListener('document:signed', handleDocumentSigned as EventListener)
+      window.removeEventListener('document:status_changed', handleDocumentStatusChanged as EventListener)
+      window.removeEventListener('document:updated', handleDocumentUpdated as EventListener)
+      window.removeEventListener('dashboard:update', handleDashboardUpdate as EventListener)
+    }
+  }, [user, loadDocuments])
 
   const statsCards = [
     {

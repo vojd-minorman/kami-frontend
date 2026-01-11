@@ -445,7 +445,8 @@ export default function EditTemplatePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [documentType, setDocumentType] = useState<DocumentType | null>(null)
-  const [template, setTemplate] = useState<PDFTemplate | null>(null)
+  const [template, setTemplate] = useState<PDFTemplate & { id?: string; isActive?: boolean } | null>(null)
+  const [currentTemplateId, setCurrentTemplateId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -1115,8 +1116,13 @@ export default function EditTemplatePage() {
       const documentTypeData = await api.getDocumentType(documentTypeId)
       setDocumentType(documentTypeData)
       
+      // Récupérer le templateId depuis les query params si présent
+      const urlParams = new URLSearchParams(window.location.search)
+      const templateId = urlParams.get('templateId')
+      setCurrentTemplateId(templateId)
+
       try {
-        const templateData = await api.getTemplate(documentTypeId)
+        const templateData = await api.getTemplate(documentTypeId, templateId || undefined)
         if (templateData) {
           // Normaliser les marges : remplacer 50 par 2.5 si nécessaire
           const normalizedTemplate = { ...templateData }
@@ -1290,8 +1296,9 @@ export default function EditTemplatePage() {
       const placeholderCount = placeholderMatches?.length || 0
       console.log('Found placeholders:', placeholderCount)
       
-      const updatedTemplate: PDFTemplate = {
+      const updatedTemplate: PDFTemplate & { id?: string; isActive?: boolean } = {
         ...template,
+        id: currentTemplateId || template.id, // Inclure l'ID si on édite un template existant
         // Sauvegarder le HTML directement dans content
         // Les placeholders {{document.values.fieldName}} seront remplacés par Puppeteer lors de la génération
         content: html,

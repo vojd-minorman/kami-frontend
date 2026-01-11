@@ -16,9 +16,10 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Trash2, GripVertical } from 'lucide-react'
+import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Trash2, GripVertical, Camera, Image as ImageIcon, X, Upload } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
+import { usePermissions } from '@/hooks/use-permissions'
 import { api, type DocumentType, type DocumentFieldGroup, type User } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { Badge } from '@/components/ui/badge'
@@ -28,6 +29,7 @@ export default function CreateVoucherPage() {
   const router = useRouter()
   const { t } = useLocale()
   const { user } = useAuth()
+  const { hasPermission } = usePermissions()
   
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -44,13 +46,26 @@ export default function CreateVoucherPage() {
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [searchingDocuments, setSearchingDocuments] = useState<Record<string, boolean>>({})
   const [foundDocuments, setFoundDocuments] = useState<Record<string, any>>({})
+  const [uploadingImages, setUploadingImages] = useState<Record<string, boolean>>({})
   const { toast } = useToast()
 
   useEffect(() => {
     if (user) {
-      loadDocumentTypes()
+      // Vérifier la permission directement sans inclure hasPermission dans les dépendances
+      const canReadDocumentTypes = hasPermission('document_type.read')
+      if (canReadDocumentTypes) {
+        loadDocumentTypes()
+      } else {
+        setLoading(false)
+        toast({
+          title: 'Permission requise',
+          description: 'Vous n\'avez pas la permission de créer des documents. La permission "document_type.read" est requise.',
+          variant: 'destructive',
+        })
+      }
       loadUsers()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
   
   const loadUsers = async () => {
@@ -71,6 +86,12 @@ export default function CreateVoucherPage() {
   }
 
   const loadDocumentTypes = async () => {
+    // Vérifier la permission avant d'appeler l'API
+    if (!hasPermission('document_type.read')) {
+      setLoading(false)
+      return
+    }
+    
     try {
       setLoading(true)
       const types = await api.getDocumentTypes()
@@ -371,22 +392,31 @@ export default function CreateVoucherPage() {
           group.fields?.forEach(field => {
             if (field.required) {
               const value = row[field.name]
-              if (field.type === 'checkbox') {
-                if (value !== true && value !== 'true' && value !== 1) {
+              if (field.type === 'checkbox' || field.type === 'yesno') {
+                if (value === undefined || value === null || value === '') {
                   newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
+                  isValid = false
                 }
               } else if (field.type === 'document_link') {
                 if (!value || typeof value !== 'object' || !value.documentNumber || !value.documentTypeId) {
                   newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
+                  isValid = false
                 } else {
                   const fieldKey = `${group.name}_${rowIndex}_${field.name}`
                   if (!foundDocuments[fieldKey]) {
                     newErrors[`${group.name}[${rowIndex}].${field.name}`] = `Le document ${value.documentNumber} n'a pas été trouvé (ligne ${rowIndex + 1})`
+                    isValid = false
                   }
+                }
+              } else if (field.type === 'image' || field.type === 'image_multiple') {
+                if (!value || (Array.isArray(value) && value.length === 0) || (typeof value === 'string' && value.trim() === '')) {
+                  newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
+                  isValid = false
                 }
               } else {
                 if (!value || (typeof value === 'string' && value.trim() === '')) {
                   newErrors[`${group.name}[${rowIndex}].${field.name}`] = `${field.label} (ligne ${rowIndex + 1}) est requis`
+                  isValid = false
                 }
               }
             }
@@ -398,22 +428,31 @@ export default function CreateVoucherPage() {
         group.fields?.forEach(field => {
           if (field.required) {
             const value = groupData[field.name]
-            if (field.type === 'checkbox') {
-              if (value !== true && value !== 'true' && value !== 1) {
+            if (field.type === 'checkbox' || field.type === 'yesno') {
+              if (value === undefined || value === null || value === '') {
                 newErrors[`${group.name}.${field.name}`] = `${field.label} est requis`
+                isValid = false
               }
             } else if (field.type === 'document_link') {
               if (!value || typeof value !== 'object' || !value.documentNumber || !value.documentTypeId) {
                 newErrors[`${group.name}.${field.name}`] = `${field.label} est requis`
+                isValid = false
               } else {
                 const fieldKey = `${group.name}_${field.name}`
                 if (!foundDocuments[fieldKey]) {
                   newErrors[`${group.name}.${field.name}`] = `Le document ${value.documentNumber} n'a pas été trouvé`
+                  isValid = false
                 }
+              }
+            } else if (field.type === 'image' || field.type === 'image_multiple') {
+              if (!value || (Array.isArray(value) && value.length === 0) || (typeof value === 'string' && value.trim() === '')) {
+                newErrors[`${group.name}.${field.name}`] = `${field.label} est requis`
+                isValid = false
               }
             } else {
               if (!value || (typeof value === 'string' && value.trim() === '')) {
                 newErrors[`${group.name}.${field.name}`] = `${field.label} est requis`
+                isValid = false
               }
             }
           }
@@ -569,7 +608,6 @@ export default function CreateVoucherPage() {
         )
 
       case 'textarea':
-      case 'text':
         return (
           <div key={field.name} className="space-y-2">
             <Label htmlFor={field.name}>
@@ -578,11 +616,11 @@ export default function CreateVoucherPage() {
             </Label>
             <Textarea
               id={field.name}
-              value={fieldValue}
+              value={fieldValue || ''}
               onChange={(e) => handleFieldChange(field.name, e.target.value)}
               placeholder={field.placeholder || `Entrez ${field.label || field.name}`}
               className={fieldError ? 'border-destructive' : ''}
-              rows={field.rows || 4}
+              rows={field.rows || 6}
             />
             {fieldError && (
               <p className="text-sm text-destructive flex items-center gap-1">
@@ -697,6 +735,323 @@ export default function CreateVoucherPage() {
               onChange={(e) => handleFieldChange(field.name, e.target.value)}
               className={fieldError ? 'border-destructive' : ''}
             />
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'time':
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <Input
+              id={field.name}
+              type="time"
+              value={fieldValue || ''}
+              onChange={(e) => handleFieldChange(field.name, e.target.value)}
+              className={fieldError ? 'border-destructive' : ''}
+            />
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'yesno':
+        // Parser les options pour obtenir les labels personnalisés
+        let yesNoOptions: { yesLabel: string; noLabel: string } = { yesLabel: 'Oui', noLabel: 'Non' }
+        if (field.options) {
+          if (typeof field.options === 'string') {
+            try {
+              const parsed = JSON.parse(field.options)
+              if (parsed.yesLabel && parsed.noLabel) {
+                yesNoOptions = parsed
+              }
+            } catch (e) {
+              // Garder les valeurs par défaut
+            }
+          } else if (typeof field.options === 'object' && field.options.yesLabel && field.options.noLabel) {
+            yesNoOptions = field.options
+          }
+        }
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <Select
+              value={String(fieldValue === true || fieldValue === 'true' || fieldValue === '1' || fieldValue === 'Oui' || fieldValue === yesNoOptions.yesLabel ? 'true' : fieldValue === false || fieldValue === 'false' || fieldValue === '0' || fieldValue === 'Non' || fieldValue === yesNoOptions.noLabel ? 'false' : '')}
+              onValueChange={(value) => handleFieldChange(field.name, value === 'true')}
+            >
+              <SelectTrigger className={fieldError ? 'border-destructive' : ''}>
+                <SelectValue placeholder={`Sélectionnez ${field.label || field.name}`} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">{yesNoOptions.yesLabel}</SelectItem>
+                <SelectItem value="false">{yesNoOptions.noLabel}</SelectItem>
+              </SelectContent>
+            </Select>
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'image':
+        const imageValue = Array.isArray(fieldValue) ? fieldValue[0] : fieldValue
+        const imageUrl = typeof imageValue === 'string' ? imageValue : (imageValue?.url || imageValue?.src || '')
+
+        const handleImageUpload = async (file: File) => {
+          const fieldKey = field.name
+          setUploadingImages(prev => ({ ...prev, [fieldKey]: true }))
+          try {
+            const response = await api.uploadImage(file)
+            handleFieldChange(field.name, response.url)
+            toast({
+              title: 'Image uploadée',
+              description: 'L\'image a été uploadée avec succès.',
+            })
+          } catch (error: any) {
+            console.error('Error uploading image:', error)
+            toast({
+              title: 'Erreur',
+              description: error.message || 'Impossible d\'uploader l\'image.',
+              variant: 'destructive',
+            })
+          } finally {
+            setUploadingImages(prev => ({ ...prev, [fieldKey]: false }))
+          }
+        }
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  id={`${field.name}_input`}
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleImageUpload(file)
+                    }
+                  }}
+                  className="hidden"
+                />
+                <input
+                  type="file"
+                  id={`${field.name}_gallery`}
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleImageUpload(file)
+                    }
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${field.name}_input`)?.click()}
+                  disabled={uploadingImages[field.name]}
+                  className="flex items-center gap-2"
+                >
+                  <Camera className="h-4 w-4" />
+                  {uploadingImages[field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Prendre une photo'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${field.name}_gallery`)?.click()}
+                  disabled={uploadingImages[field.name]}
+                  className="flex items-center gap-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  {uploadingImages[field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sélectionner depuis la galerie'}
+                </Button>
+              </div>
+              {imageUrl && (
+                <div className="relative inline-block">
+                  <img src={imageUrl} alt={field.label || field.name} className="max-w-full h-auto max-h-64 rounded border" />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleFieldChange(field.name, '')}
+                    className="absolute top-2 right-2 h-8 w-8 p-0 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              {field.options && typeof field.options === 'object' && field.options.description && (
+                <p className="text-sm text-muted-foreground">{field.options.description}</p>
+              )}
+            </div>
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'image_multiple':
+        const imagesValue = Array.isArray(fieldValue) ? fieldValue : (fieldValue ? [fieldValue] : [])
+        const imageUrls = imagesValue.map(img => typeof img === 'string' ? img : (img?.url || img?.src || '')).filter(Boolean)
+
+        const handleMultipleImagesUpload = async (files: FileList | null) => {
+          if (!files || files.length === 0) return
+          
+          const fieldKey = field.name
+          setUploadingImages(prev => ({ ...prev, [fieldKey]: true }))
+          try {
+            const filesArray = Array.from(files)
+            const response = await api.uploadImages(filesArray)
+            const newUrls = [...imageUrls, ...response.urls]
+            handleFieldChange(field.name, newUrls)
+            toast({
+              title: `${response.urls.length} image(s) uploadée(s)`,
+              description: 'Les images ont été uploadées avec succès.',
+            })
+          } catch (error: any) {
+            console.error('Error uploading images:', error)
+            toast({
+              title: 'Erreur',
+              description: error.message || 'Impossible d\'uploader les images.',
+              variant: 'destructive',
+            })
+          } finally {
+            setUploadingImages(prev => ({ ...prev, [fieldKey]: false }))
+          }
+        }
+
+        // Parser les options pour obtenir maxCount
+        const maxCount = field.options && typeof field.options === 'object' && field.options.maxCount 
+          ? parseInt(field.options.maxCount) 
+          : (field.validationRules && typeof field.validationRules === 'object' && field.validationRules.maxCount 
+            ? parseInt(field.validationRules.maxCount) 
+            : 10)
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+              {maxCount && <span className="text-muted-foreground ml-2">({imageUrls.length}/{maxCount})</span>}
+            </Label>
+            <div className="space-y-3">
+              <div className="flex gap-2 flex-wrap">
+                <input
+                  type="file"
+                  id={`${field.name}_input`}
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files && imageUrls.length + e.target.files.length <= maxCount) {
+                      handleMultipleImagesUpload(e.target.files)
+                    } else {
+                      toast({
+                        title: 'Limite atteinte',
+                        description: `Vous ne pouvez pas ajouter plus de ${maxCount} images.`,
+                        variant: 'destructive',
+                      })
+                    }
+                  }}
+                  className="hidden"
+                />
+                <input
+                  type="file"
+                  id={`${field.name}_gallery`}
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files && imageUrls.length + e.target.files.length <= maxCount) {
+                      handleMultipleImagesUpload(e.target.files)
+                    } else {
+                      toast({
+                        title: 'Limite atteinte',
+                        description: `Vous ne pouvez pas ajouter plus de ${maxCount} images.`,
+                        variant: 'destructive',
+                      })
+                    }
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${field.name}_input`)?.click()}
+                  disabled={uploadingImages[field.name] || imageUrls.length >= maxCount}
+                  className="flex items-center gap-2"
+                >
+                  <Camera className="h-4 w-4" />
+                  {uploadingImages[field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Prendre des photos'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${field.name}_gallery`)?.click()}
+                  disabled={uploadingImages[field.name] || imageUrls.length >= maxCount}
+                  className="flex items-center gap-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  {uploadingImages[field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sélectionner depuis la galerie'}
+                </Button>
+              </div>
+              {imageUrls.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {imageUrls.map((url, index) => (
+                    <div key={index} className="relative group">
+                      <img src={url} alt={`${field.label || field.name} ${index + 1}`} className="w-full h-32 object-cover rounded border" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const newUrls = imageUrls.filter((_, i) => i !== index)
+                          handleFieldChange(field.name, newUrls)
+                        }}
+                        className="absolute top-1 right-1 h-6 w-6 p-0 bg-destructive text-destructive-foreground hover:bg-destructive/90 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {field.options && typeof field.options === 'object' && field.options.description && (
+                <p className="text-sm text-muted-foreground">{field.options.description}</p>
+              )}
+            </div>
             {fieldError && (
               <p className="text-sm text-destructive flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />
@@ -855,6 +1210,322 @@ export default function CreateVoucherPage() {
           </div>
         )
 
+      case 'time':
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={fieldId || field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <Input
+              id={fieldId || field.name}
+              type="time"
+              value={value || ''}
+              onChange={(e) => onChange(e.target.value)}
+              className={fieldError ? 'border-destructive' : ''}
+            />
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'yesno':
+        // Parser les options pour obtenir les labels personnalisés
+        let yesNoOptionsGroup: { yesLabel: string; noLabel: string } = { yesLabel: 'Oui', noLabel: 'Non' }
+        if (field.options) {
+          if (typeof field.options === 'string') {
+            try {
+              const parsed = JSON.parse(field.options)
+              if (parsed.yesLabel && parsed.noLabel) {
+                yesNoOptionsGroup = parsed
+              }
+            } catch (e) {
+              // Garder les valeurs par défaut
+            }
+          } else if (typeof field.options === 'object' && field.options.yesLabel && field.options.noLabel) {
+            yesNoOptionsGroup = field.options
+          }
+        }
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={fieldId || field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <Select
+              value={String(value === true || value === 'true' || value === '1' || value === 'Oui' || value === yesNoOptionsGroup.yesLabel ? 'true' : value === false || value === 'false' || value === '0' || value === 'Non' || value === yesNoOptionsGroup.noLabel ? 'false' : '')}
+              onValueChange={(val) => onChange(val === 'true')}
+            >
+              <SelectTrigger className={fieldError ? 'border-destructive' : ''}>
+                <SelectValue placeholder={`Sélectionnez ${field.label || field.name}`} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="true">{yesNoOptionsGroup.yesLabel}</SelectItem>
+                <SelectItem value="false">{yesNoOptionsGroup.noLabel}</SelectItem>
+              </SelectContent>
+            </Select>
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'image':
+        const imageValueGroup = Array.isArray(value) ? value[0] : value
+        const imageUrlGroup = typeof imageValueGroup === 'string' ? imageValueGroup : (imageValueGroup?.url || imageValueGroup?.src || '')
+
+        const handleImageUploadGroup = async (file: File) => {
+          const fieldKey = fieldId || field.name
+          setUploadingImages(prev => ({ ...prev, [fieldKey]: true }))
+          try {
+            const response = await api.uploadImage(file)
+            onChange(response.url)
+            toast({
+              title: 'Image uploadée',
+              description: 'L\'image a été uploadée avec succès.',
+            })
+          } catch (error: any) {
+            console.error('Error uploading image:', error)
+            toast({
+              title: 'Erreur',
+              description: error.message || 'Impossible d\'uploader l\'image.',
+              variant: 'destructive',
+            })
+          } finally {
+            setUploadingImages(prev => ({ ...prev, [fieldKey]: false }))
+          }
+        }
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={fieldId || field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  id={`${fieldId || field.name}_input`}
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleImageUploadGroup(file)
+                    }
+                  }}
+                  className="hidden"
+                />
+                <input
+                  type="file"
+                  id={`${fieldId || field.name}_gallery`}
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) {
+                      handleImageUploadGroup(file)
+                    }
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${fieldId || field.name}_input`)?.click()}
+                  disabled={uploadingImages[fieldId || field.name]}
+                  className="flex items-center gap-2"
+                >
+                  <Camera className="h-4 w-4" />
+                  {uploadingImages[fieldId || field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Prendre une photo'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${fieldId || field.name}_gallery`)?.click()}
+                  disabled={uploadingImages[fieldId || field.name]}
+                  className="flex items-center gap-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  {uploadingImages[fieldId || field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sélectionner depuis la galerie'}
+                </Button>
+              </div>
+              {imageUrlGroup && (
+                <div className="relative inline-block">
+                  <img src={imageUrlGroup} alt={field.label || field.name} className="max-w-full h-auto max-h-64 rounded border" />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onChange('')}
+                    className="absolute top-2 right-2 h-8 w-8 p-0 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              {field.options && typeof field.options === 'object' && field.options.description && (
+                <p className="text-sm text-muted-foreground">{field.options.description}</p>
+              )}
+            </div>
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'image_multiple':
+        const imagesValueGroup = Array.isArray(value) ? value : (value ? [value] : [])
+        const imageUrlsGroup = imagesValueGroup.map(img => typeof img === 'string' ? img : (img?.url || img?.src || '')).filter(Boolean)
+
+        const handleMultipleImagesUploadGroup = async (files: FileList | null) => {
+          if (!files || files.length === 0) return
+          
+          const fieldKey = fieldId || field.name
+          setUploadingImages(prev => ({ ...prev, [fieldKey]: true }))
+          try {
+            const filesArray = Array.from(files)
+            const response = await api.uploadImages(filesArray)
+            const newUrls = [...imageUrlsGroup, ...response.urls]
+            onChange(newUrls)
+            toast({
+              title: `${response.urls.length} image(s) uploadée(s)`,
+              description: 'Les images ont été uploadées avec succès.',
+            })
+          } catch (error: any) {
+            console.error('Error uploading images:', error)
+            toast({
+              title: 'Erreur',
+              description: error.message || 'Impossible d\'uploader les images.',
+              variant: 'destructive',
+            })
+          } finally {
+            setUploadingImages(prev => ({ ...prev, [fieldKey]: false }))
+          }
+        }
+
+        const maxCountGroup = field.options && typeof field.options === 'object' && field.options.maxCount 
+          ? parseInt(field.options.maxCount) 
+          : (field.validationRules && typeof field.validationRules === 'object' && field.validationRules.maxCount 
+            ? parseInt(field.validationRules.maxCount) 
+            : 10)
+
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={fieldId || field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+              {maxCountGroup && <span className="text-muted-foreground ml-2">({imageUrlsGroup.length}/{maxCountGroup})</span>}
+            </Label>
+            <div className="space-y-3">
+              <div className="flex gap-2 flex-wrap">
+                <input
+                  type="file"
+                  id={`${fieldId || field.name}_input`}
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files && imageUrlsGroup.length + e.target.files.length <= maxCountGroup) {
+                      handleMultipleImagesUploadGroup(e.target.files)
+                    } else {
+                      toast({
+                        title: 'Limite atteinte',
+                        description: `Vous ne pouvez pas ajouter plus de ${maxCountGroup} images.`,
+                        variant: 'destructive',
+                      })
+                    }
+                  }}
+                  className="hidden"
+                />
+                <input
+                  type="file"
+                  id={`${fieldId || field.name}_gallery`}
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={(e) => {
+                    if (e.target.files && imageUrlsGroup.length + e.target.files.length <= maxCountGroup) {
+                      handleMultipleImagesUploadGroup(e.target.files)
+                    } else {
+                      toast({
+                        title: 'Limite atteinte',
+                        description: `Vous ne pouvez pas ajouter plus de ${maxCountGroup} images.`,
+                        variant: 'destructive',
+                      })
+                    }
+                  }}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${fieldId || field.name}_input`)?.click()}
+                  disabled={uploadingImages[fieldId || field.name] || imageUrlsGroup.length >= maxCountGroup}
+                  className="flex items-center gap-2"
+                >
+                  <Camera className="h-4 w-4" />
+                  {uploadingImages[fieldId || field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Prendre des photos'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById(`${fieldId || field.name}_gallery`)?.click()}
+                  disabled={uploadingImages[fieldId || field.name] || imageUrlsGroup.length >= maxCountGroup}
+                  className="flex items-center gap-2"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                  {uploadingImages[fieldId || field.name] ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sélectionner depuis la galerie'}
+                </Button>
+              </div>
+              {imageUrlsGroup.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {imageUrlsGroup.map((url, index) => (
+                    <div key={index} className="relative group">
+                      <img src={url} alt={`${field.label || field.name} ${index + 1}`} className="w-full h-32 object-cover rounded border" />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const newUrls = imageUrlsGroup.filter((_, i) => i !== index)
+                          onChange(newUrls)
+                        }}
+                        className="absolute top-1 right-1 h-6 w-6 p-0 bg-destructive text-destructive-foreground hover:bg-destructive/90 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {field.options && typeof field.options === 'object' && field.options.description && (
+                <p className="text-sm text-muted-foreground">{field.options.description}</p>
+              )}
+            </div>
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
       case 'select':
         let selectOptions: any[] = []
         if (field.options) {
@@ -907,6 +1578,30 @@ export default function CreateVoucherPage() {
                 Aucune option configurée
               </div>
             )}
+            {fieldError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {fieldError}
+              </p>
+            )}
+          </div>
+        )
+
+      case 'textarea':
+        return (
+          <div key={field.name} className="space-y-2">
+            <Label htmlFor={fieldId || field.name}>
+              {field.label || field.name}
+              {field.required && <span className="text-destructive ml-1">*</span>}
+            </Label>
+            <Textarea
+              id={fieldId || field.name}
+              value={value || ''}
+              onChange={(e) => onChange(e.target.value)}
+              placeholder={field.placeholder || `Entrez ${field.label || field.name}`}
+              className={fieldError ? 'border-destructive' : ''}
+              rows={field.rows || 6}
+            />
             {fieldError && (
               <p className="text-sm text-destructive flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />

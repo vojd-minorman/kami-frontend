@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from './use-auth'
 import { api } from '@/lib/api'
 
@@ -60,7 +60,7 @@ export function usePermissions() {
     }
   }
 
-  const hasPermission = (permissionCode: string, documentTypeId?: string): boolean => {
+  const hasPermission = useCallback((permissionCode: string, documentTypeId?: string): boolean => {
     if (!user) return false
     
     // Super admin ou admin ont toutes les permissions
@@ -83,17 +83,17 @@ export function usePermissions() {
       }
       return false
     })
-  }
+  }, [user, permissions])
 
-  const hasAnyPermission = (permissionCodes: string[], documentTypeId?: string): boolean => {
+  const hasAnyPermission = useCallback((permissionCodes: string[], documentTypeId?: string): boolean => {
     return permissionCodes.some((code) => hasPermission(code, documentTypeId))
-  }
+  }, [hasPermission])
 
-  const hasAllPermissions = (permissionCodes: string[], documentTypeId?: string): boolean => {
+  const hasAllPermissions = useCallback((permissionCodes: string[], documentTypeId?: string): boolean => {
     return permissionCodes.every((code) => hasPermission(code, documentTypeId))
-  }
+  }, [hasPermission])
 
-  const hasRole = (roleCode: string): boolean => {
+  const hasRole = useCallback((roleCode: string): boolean => {
     if (!user) {
       return false
     }
@@ -106,9 +106,9 @@ export function usePermissions() {
       const rCode = r.code || r.name?.toLowerCase().replace(/\s+/g, '_')
       return (rCode === roleCode || rCode === roleCode.toLowerCase()) && (r.isActive !== false)
     })
-  }
+  }, [user])
 
-  const isSuperAdmin = (userToCheck?: typeof user): boolean => {
+  const isSuperAdmin = useCallback((userToCheck?: typeof user): boolean => {
     // Utiliser le user passé en paramètre ou celui du hook
     const userToUse = userToCheck ?? user
     
@@ -125,7 +125,7 @@ export function usePermissions() {
       const rCode = r.code || r.name?.toLowerCase().replace(/\s+/g, '_')
       return (rCode === 'super_admin' || rCode === 'admin' || rCode === 'administrateur') && (r.isActive !== false)
     })
-  }
+  }, [user])
 
   return {
     permissions,

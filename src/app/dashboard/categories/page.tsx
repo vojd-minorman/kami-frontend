@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Plus, Edit, Trash2, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
+import { usePermissions } from '@/hooks/use-permissions'
 import { PermissionGuard } from '@/components/permission-guard'
 import { api, type Category } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
@@ -24,15 +25,10 @@ import { DashboardShell } from '@/components/dashboard-shell'
 export default function CategoriesPage() {
   const router = useRouter()
   const { user } = useAuth()
+  const { hasPermission } = usePermissions()
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (user) {
-      loadCategories()
-    }
-  }, [user])
 
   const loadCategories = async () => {
     try {
@@ -45,6 +41,53 @@ export default function CategoriesPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (user) {
+      loadCategories()
+    }
+  }, [user])
+
+  // Écouter les événements WebSocket pour mettre à jour la liste des catégories en temps réel
+  useEffect(() => {
+    if (!user) return
+
+    const handleCategoryCreated = (event: CustomEvent) => {
+      console.log('🏷️ [Categories] Événement category:created reçu:', event.detail)
+      loadCategories()
+    }
+
+    const handleCategoryUpdated = (event: CustomEvent) => {
+      console.log('🏷️ [Categories] Événement category:updated reçu:', event.detail)
+      const updatedData = event.detail
+      // Mettre à jour la catégorie dans la liste
+      setCategories(prev => prev.map(cat => 
+        cat.id === updatedData.categoryId 
+          ? { ...cat, ...updatedData }
+          : cat
+      ))
+      // Rafraîchir pour avoir les données complètes
+      loadCategories()
+    }
+
+    const handleCategoryDeleted = (event: CustomEvent) => {
+      console.log('🏷️ [Categories] Événement category:deleted reçu:', event.detail)
+      const deletedData = event.detail
+      // Retirer la catégorie de la liste
+      setCategories(prev => prev.filter(cat => cat.id !== deletedData.categoryId))
+    }
+
+    // Écouter les événements personnalisés
+    window.addEventListener('category:created', handleCategoryCreated as EventListener)
+    window.addEventListener('category:updated', handleCategoryUpdated as EventListener)
+    window.addEventListener('category:deleted', handleCategoryDeleted as EventListener)
+
+    return () => {
+      window.removeEventListener('category:created', handleCategoryCreated as EventListener)
+      window.removeEventListener('category:updated', handleCategoryUpdated as EventListener)
+      window.removeEventListener('category:deleted', handleCategoryDeleted as EventListener)
+    }
+  }, [user])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Êtes-vous sûr de vouloir supprimer cette catégorie ? Cette action est irréversible.')) {
@@ -82,13 +125,15 @@ export default function CategoriesPage() {
               Gérez les catégories pour organiser vos types de documents
             </p>
           </div>
-          <Button 
-            className="w-full sm:w-auto"
-            onClick={() => router.push('/dashboard/categories/create')}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Créer une catégorie
-          </Button>
+          {hasPermission('category.create') && (
+            <Button 
+              className="w-full sm:w-auto"
+              onClick={() => router.push('/dashboard/categories/create')}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Créer une catégorie
+            </Button>
+          )}
         </div>
 
         {/* Categories List */}
@@ -114,13 +159,15 @@ export default function CategoriesPage() {
                 <p className="text-muted-foreground mb-4">
                   Aucune catégorie trouvée
                 </p>
-                <Button
-                  onClick={() => router.push('/dashboard/categories/create')}
-                  variant="outline"
-                >
-                  <Plus className="mr-2 h-4 w-4" />
-                  Créer votre première catégorie
-                </Button>
+                {hasPermission('category.create') && (
+                  <Button
+                    onClick={() => router.push('/dashboard/categories/create')}
+                    variant="outline"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Créer votre première catégorie
+                  </Button>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -159,25 +206,29 @@ export default function CategoriesPage() {
                         <TableCell>{getStatusBadge(category.status)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Link href={`/dashboard/categories/${category.id}/edit`}>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" title="Modifier">
-                                <Edit className="h-4 w-4" />
+                            {hasPermission('category.update') && (
+                              <Link href={`/dashboard/categories/${category.id}/edit`}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" title="Modifier">
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                              </Link>
+                            )}
+                            {hasPermission('category.delete') && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:text-destructive"
+                                onClick={() => handleDelete(category.id)}
+                                disabled={deleting === category.id}
+                                title="Supprimer"
+                              >
+                                {deleting === category.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
                               </Button>
-                            </Link>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(category.id)}
-                              disabled={deleting === category.id}
-                              title="Supprimer"
-                            >
-                              {deleting === category.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

@@ -35,7 +35,7 @@ import { Separator } from '@/components/ui/separator'
 import { ArrowLeft, Save, Loader2, AlertCircle, Plus, Edit, Trash2, CheckCircle2 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
-import { api, type DocumentType, type DocumentField, type DocumentFieldGroup, type Category } from '@/lib/api'
+import { api, type DocumentType, type DocumentField, type DocumentFieldGroup, type Category, type DocumentWorkflow } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 
 export default function EditDocumentTypePage() {
@@ -55,6 +55,10 @@ export default function EditDocumentTypePage() {
   const [loadingCategories, setLoadingCategories] = useState(false)
   const [allDocumentTypes, setAllDocumentTypes] = useState<DocumentType[]>([])
   const [loadingDocumentTypes, setLoadingDocumentTypes] = useState(false)
+  const [workflows, setWorkflows] = useState<DocumentWorkflow[]>([])
+  const [loadingWorkflows, setLoadingWorkflows] = useState(false)
+  const [roles, setRoles] = useState<Array<{ id: string; name: string; code: string }>>([])
+  const [loadingRoles, setLoadingRoles] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -63,6 +67,13 @@ export default function EditDocumentTypePage() {
     status: 'active' as 'active' | 'inactive',
   })
   const [errors, setErrors] = useState<Record<string, string>>({})
+  
+  // États pour les signataires par défaut
+  const [defaultSigners, setDefaultSigners] = useState<Array<{ userId: string; position: 'first' | 'second_last' | 'third_last' | 'last' | number; user?: any }>>([])
+  const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; fullName: string; email: string; role: string }>>([])
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [selectedDefaultSignerUserId, setSelectedDefaultSignerUserId] = useState<string>('')
+  const [selectedDefaultSignerPosition, setSelectedDefaultSignerPosition] = useState<'first' | 'second_last' | 'third_last' | 'last'>('last')
   
   // Dialog pour créer/modifier un champ
   const [showFieldDialog, setShowFieldDialog] = useState(false)
@@ -96,6 +107,19 @@ export default function EditDocumentTypePage() {
   const [savingGroup, setSavingGroup] = useState(false)
   const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null)
 
+  // Dialog pour créer/modifier un workflow
+  const [showWorkflowDialog, setShowWorkflowDialog] = useState(false)
+  const [editingWorkflow, setEditingWorkflow] = useState<DocumentWorkflow | null>(null)
+  const [workflowFormData, setWorkflowFormData] = useState({
+    order: 1,
+    roleRequired: null as string | null,
+    action: 'validate' as DocumentWorkflow['action'],
+    isMandatory: true,
+  })
+  const [workflowErrors, setWorkflowErrors] = useState<Record<string, string>>({})
+  const [savingWorkflow, setSavingWorkflow] = useState(false)
+  const [deletingWorkflowId, setDeletingWorkflowId] = useState<string | null>(null)
+
   useEffect(() => {
     if (user && documentTypeId) {
       loadDocumentType()
@@ -103,6 +127,9 @@ export default function EditDocumentTypePage() {
       loadFieldGroups()
       loadCategories()
       loadAllDocumentTypes()
+      loadWorkflows()
+      loadRoles()
+      loadUsers()
     }
   }, [user, documentTypeId])
 
@@ -118,12 +145,49 @@ export default function EditDocumentTypePage() {
         categoryId: data.categoryId || '',
         status: data.status || 'active',
       })
+      
+      // Charger les signataires par défaut depuis signatureConfig
+      if (data.signatureConfig) {
+        try {
+          const signatureConfig = typeof data.signatureConfig === 'string' 
+            ? JSON.parse(data.signatureConfig) 
+            : data.signatureConfig
+          
+          if (signatureConfig.defaultSigners && Array.isArray(signatureConfig.defaultSigners)) {
+            // Charger les utilisateurs pour avoir les informations complètes
+            const usersResponse = await api.getUsers({ limit: 1000 })
+            const usersMap = new Map(usersResponse.data.map((u: any) => [u.id, u]))
+            
+            const signersWithUsers = signatureConfig.defaultSigners.map((signer: any) => ({
+              userId: signer.userId,
+              position: signer.position || 'last',
+              user: usersMap.get(signer.userId),
+            }))
+            
+            setDefaultSigners(signersWithUsers)
+          }
+        } catch (error) {
+          console.error('Error parsing signatureConfig:', error)
+        }
+      }
     } catch (error: any) {
       console.error('Error loading document type:', error)
       alert(error.message || 'Erreur lors du chargement du type de document')
       router.push('/dashboard/document-types')
     } finally {
       setLoading(false)
+    }
+  }
+  
+  const loadUsers = async () => {
+    try {
+      setLoadingUsers(true)
+      const response = await api.getUsers({ limit: 1000 })
+      setAvailableUsers(response.data || [])
+    } catch (error: any) {
+      console.error('Error loading users:', error)
+    } finally {
+      setLoadingUsers(false)
     }
   }
 
@@ -175,6 +239,30 @@ export default function EditDocumentTypePage() {
     }
   }
 
+  const loadWorkflows = async () => {
+    try {
+      setLoadingWorkflows(true)
+      const workflowsData = await api.getDocumentWorkflows(documentTypeId)
+      setWorkflows(workflowsData)
+    } catch (error) {
+      console.error('Error loading workflows:', error)
+    } finally {
+      setLoadingWorkflows(false)
+    }
+  }
+
+  const loadRoles = async () => {
+    try {
+      setLoadingRoles(true)
+      const rolesData = await api.getRoles()
+      setRoles(rolesData)
+    } catch (error) {
+      console.error('Error loading roles:', error)
+    } finally {
+      setLoadingRoles(false)
+    }
+  }
+
   const handleChange = (field: string, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     if (errors[field]) {
@@ -213,12 +301,33 @@ export default function EditDocumentTypePage() {
     try {
       setSaving(true)
       
-      const documentTypeData = {
+      const documentTypeData: any = {
         name: formData.name.trim(),
         code: formData.code.trim().toUpperCase(),
         description: formData.description.trim() || null,
         categoryId: formData.categoryId || null,
         status: formData.status,
+      }
+      
+      // Ajouter signatureConfig avec les signataires par défaut
+      if (defaultSigners.length > 0 || documentType?.signatureConfig) {
+        let signatureConfig: any = {}
+        try {
+          if (documentType?.signatureConfig) {
+            signatureConfig = typeof documentType.signatureConfig === 'string'
+              ? JSON.parse(documentType.signatureConfig)
+              : documentType.signatureConfig
+          }
+        } catch (error) {
+          console.error('Error parsing existing signatureConfig:', error)
+        }
+        
+        signatureConfig.defaultSigners = defaultSigners.map(signer => ({
+          userId: signer.userId,
+          position: signer.position,
+        }))
+        
+        documentTypeData.signatureConfig = JSON.stringify(signatureConfig)
       }
 
       await api.updateDocumentType(documentTypeId, documentTypeData)
@@ -291,21 +400,38 @@ export default function EditDocumentTypePage() {
       newErrors.name = 'Un champ avec ce nom existe déjà'
     }
 
-    // Valider les options JSON pour les champs select
-    if (fieldFormData.type === 'select' && fieldFormData.options.trim()) {
+    // Valider les options JSON pour les champs select et yesno
+    if ((fieldFormData.type === 'select' || fieldFormData.type === 'yesno') && fieldFormData.options && fieldFormData.options.trim()) {
       try {
-        JSON.parse(fieldFormData.options)
+        const parsed = JSON.parse(fieldFormData.options)
+        if (fieldFormData.type === 'yesno') {
+          // Pour yesno, vérifier que yesLabel et noLabel sont présents
+          if (!parsed.yesLabel || !parsed.noLabel) {
+            newErrors.options = 'Pour le type yesno, les options doivent contenir "yesLabel" et "noLabel" (ex: {"yesLabel": "Oui", "noLabel": "Non"})'
+          }
+        }
       } catch {
-        newErrors.options = 'Les options doivent être au format JSON valide (ex: ["Option 1", "Option 2"])'
+        newErrors.options = fieldFormData.type === 'yesno' 
+          ? 'Les options doivent être au format JSON valide avec yesLabel et noLabel (ex: {"yesLabel": "Oui", "noLabel": "Non"})'
+          : 'Les options doivent être au format JSON valide (ex: ["Option 1", "Option 2"])'
       }
     }
 
     // Valider les règles de validation JSON
-    if (fieldFormData.validationRules.trim()) {
+    if (fieldFormData.validationRules && fieldFormData.validationRules.trim()) {
       try {
         JSON.parse(fieldFormData.validationRules)
       } catch {
         newErrors.validationRules = 'Les règles de validation doivent être au format JSON valide'
+      }
+    }
+
+    // Valider les options JSON pour les champs image et image_multiple
+    if ((fieldFormData.type === 'image' || fieldFormData.type === 'image_multiple') && fieldFormData.options && fieldFormData.options.trim()) {
+      try {
+        JSON.parse(fieldFormData.options)
+      } catch {
+        newErrors.options = 'Les options doivent être au format JSON valide (ex: {"captureMode": true, "galleryMode": true, "description": "...", "maxCount": 10})'
       }
     }
 
@@ -498,19 +624,130 @@ export default function EditDocumentTypePage() {
     }
   }
 
+  // Gestion des workflows
+  const openWorkflowDialog = (workflow?: DocumentWorkflow) => {
+    if (workflow) {
+      setEditingWorkflow(workflow)
+      setWorkflowFormData({
+        order: workflow.order,
+        roleRequired: workflow.roleRequired,
+        action: workflow.action,
+        isMandatory: workflow.isMandatory,
+      })
+    } else {
+      setEditingWorkflow(null)
+      setWorkflowFormData({
+        order: workflows.length + 1,
+        roleRequired: null,
+        action: 'validate',
+        isMandatory: true,
+      })
+    }
+    setWorkflowErrors({})
+    setShowWorkflowDialog(true)
+  }
+
+  const validateWorkflowForm = (): boolean => {
+    const newErrors: Record<string, string> = {}
+    
+    if (!workflowFormData.order || workflowFormData.order < 1) {
+      newErrors.order = 'L\'ordre doit être >= 1'
+    }
+
+    // Vérifier l'unicité de l'ordre
+    const existingWorkflow = workflows.find(w => 
+      w.order === workflowFormData.order && (!editingWorkflow || w.id !== editingWorkflow.id)
+    )
+    if (existingWorkflow) {
+      newErrors.order = 'Un workflow avec cet ordre existe déjà'
+    }
+
+    setWorkflowErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleSaveWorkflow = async () => {
+    if (!validateWorkflowForm()) {
+      return
+    }
+
+    try {
+      setSavingWorkflow(true)
+
+      const workflowData: any = {
+        order: workflowFormData.order,
+        roleRequired: workflowFormData.roleRequired || null,
+        action: workflowFormData.action,
+        isMandatory: workflowFormData.isMandatory,
+      }
+
+      if (editingWorkflow) {
+        await api.updateDocumentWorkflow(documentTypeId, editingWorkflow.id, workflowData)
+      } else {
+        await api.createDocumentWorkflow(documentTypeId, workflowData)
+      }
+
+      setShowWorkflowDialog(false)
+      await loadWorkflows()
+    } catch (error: any) {
+      console.error('Error saving workflow:', error)
+      alert(error.message || 'Erreur lors de la sauvegarde du workflow')
+    } finally {
+      setSavingWorkflow(false)
+    }
+  }
+
+  const handleDeleteWorkflow = async (workflowId: string) => {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette étape du workflow ?')) {
+      return
+    }
+
+    try {
+      setDeletingWorkflowId(workflowId)
+      await api.deleteDocumentWorkflow(documentTypeId, workflowId)
+      await loadWorkflows()
+    } catch (error: any) {
+      console.error('Error deleting workflow:', error)
+      alert(error.message || 'Erreur lors de la suppression du workflow')
+    } finally {
+      setDeletingWorkflowId(null)
+    }
+  }
+
   const getTypeBadge = (type: DocumentField['type']) => {
     const colors: Record<DocumentField['type'], string> = {
       text: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
       number: 'bg-green-500/10 text-green-500 border-green-500/20',
       date: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
       datetime: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
+      time: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
       select: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
       checkbox: 'bg-pink-500/10 text-pink-500 border-pink-500/20',
+      yesno: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
       textarea: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
       file: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+      image: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
+      image_multiple: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
       document_link: 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
     }
-    return <Badge variant="outline" className={colors[type]}>{type}</Badge>
+    
+    const labels: Record<DocumentField['type'], string> = {
+      text: 'Texte',
+      number: 'Nombre',
+      date: 'Date',
+      datetime: 'Date/Heure',
+      time: 'Heure',
+      select: 'Sélection',
+      checkbox: 'Case à cocher',
+      yesno: 'Oui/Non',
+      textarea: 'Zone de texte',
+      file: 'Fichier',
+      image: 'Image',
+      image_multiple: 'Images (multiples)',
+      document_link: 'Liaison',
+    }
+    
+    return <Badge variant="outline" className={colors[type]}>{labels[type] || type}</Badge>
   }
 
   if (loading) {
@@ -707,6 +944,158 @@ export default function EditDocumentTypePage() {
                   <p className="text-xs text-muted-foreground">
                     Pour ajouter un nouveau champ de liaison, utilisez le bouton "Ajouter un champ" dans la section "Champs du formulaire" ci-dessous.
                   </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Section Signataires par défaut */}
+          <Card className="border-border/50 mt-6">
+            <CardHeader>
+              <div>
+                <CardTitle className="text-lg md:text-xl">Signataires par défaut</CardTitle>
+                <CardDescription className="text-sm">
+                  Configurez les signataires qui seront automatiquement ajoutés lors de la création de documents de ce type. Le créateur du document sera toujours ajouté en premier signataire.
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Formulaire pour ajouter un signataire par défaut */}
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="default-signer-user">Utilisateur</Label>
+                    {loadingUsers ? (
+                      <Skeleton className="h-10 w-full" />
+                    ) : (
+                      <Select 
+                        value={selectedDefaultSignerUserId} 
+                        onValueChange={setSelectedDefaultSignerUserId}
+                      >
+                        <SelectTrigger id="default-signer-user">
+                          <SelectValue placeholder="Sélectionner un utilisateur" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableUsers.filter(u => !defaultSigners.some(s => s.userId === u.id)).length === 0 ? (
+                            <SelectItem value="__no_users__" disabled>
+                              Aucun utilisateur disponible
+                            </SelectItem>
+                          ) : (
+                            availableUsers
+                              .filter(u => !defaultSigners.some(s => s.userId === u.id))
+                              .map(user => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {user.fullName} ({user.email}) - {user.role}
+                                </SelectItem>
+                              ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="default-signer-position">Position</Label>
+                    <Select 
+                      value={selectedDefaultSignerPosition} 
+                      onValueChange={(value: any) => setSelectedDefaultSignerPosition(value)}
+                    >
+                      <SelectTrigger id="default-signer-position">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="first">Premier (après le créateur)</SelectItem>
+                        <SelectItem value="second_last">Avant-dernier</SelectItem>
+                        <SelectItem value="third_last">Avant-avant-dernier</SelectItem>
+                        <SelectItem value="last">Dernier</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      La position indique où ce signataire sera inséré dans la liste des signataires lors de la création d'un document
+                    </p>
+                  </div>
+                </div>
+                
+                <Button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedDefaultSignerUserId || selectedDefaultSignerUserId === '__no_users__') {
+                      alert('Veuillez sélectionner un utilisateur')
+                      return
+                    }
+                    
+                    const user = availableUsers.find(u => u.id === selectedDefaultSignerUserId)
+                    if (!user) return
+                    
+                    if (defaultSigners.some(s => s.userId === selectedDefaultSignerUserId)) {
+                      alert('Cet utilisateur est déjà dans la liste des signataires par défaut')
+                      return
+                    }
+                    
+                    setDefaultSigners([...defaultSigners, {
+                      userId: selectedDefaultSignerUserId,
+                      position: selectedDefaultSignerPosition,
+                      user,
+                    }])
+                    setSelectedDefaultSignerUserId('')
+                  }}
+                  disabled={!selectedDefaultSignerUserId || selectedDefaultSignerUserId === '__no_users__' || loadingUsers}
+                  className="w-full md:w-auto"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Ajouter un signataire par défaut
+                </Button>
+              </div>
+              
+              {/* Liste des signataires par défaut */}
+              {defaultSigners.length > 0 ? (
+                <div className="space-y-2">
+                  <Label>Signataires par défaut configurés</Label>
+                  <div className="space-y-2 border rounded-lg p-4">
+                    {defaultSigners.map((signer, index) => {
+                      const user = signer.user || availableUsers.find(u => u.id === signer.userId)
+                      const positionLabel = 
+                        signer.position === 'first' ? 'Premier (après le créateur)' :
+                        signer.position === 'second_last' ? 'Avant-dernier' :
+                        signer.position === 'third_last' ? 'Avant-avant-dernier' :
+                        'Dernier'
+                      
+                      return (
+                        <div
+                          key={signer.userId}
+                          className="flex items-center justify-between p-3 bg-background rounded-lg border"
+                        >
+                          <div className="flex-1">
+                            <p className="font-medium">{user?.fullName || 'Utilisateur inconnu'}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {user?.email} - {user?.role}
+                            </p>
+                            <Badge variant="outline" className="mt-1">
+                              Position: {positionLabel}
+                            </Badge>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => {
+                              setDefaultSigners(defaultSigners.filter(s => s.userId !== signer.userId))
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Ces signataires seront automatiquement ajoutés lors de la création de documents de ce type. Le créateur du document sera toujours le premier signataire, puis ces signataires seront ajoutés selon leur position configurée.
+                  </p>
+                </div>
+              ) : (
+                <div className="text-center py-4 text-muted-foreground text-sm border rounded-lg">
+                  Aucun signataire par défaut configuré. Les documents créés avec ce type auront uniquement le créateur comme premier signataire.
                 </div>
               )}
             </CardContent>
@@ -930,6 +1319,130 @@ export default function EditDocumentTypePage() {
             </CardContent>
           </Card>
 
+          {/* Section Workflows */}
+          <Card className="border-border/50 mt-6">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-lg md:text-xl">Étapes du workflow</CardTitle>
+                  <CardDescription className="text-sm">
+                    Définissez les étapes de validation et de signature avec les rôles requis
+                  </CardDescription>
+                </div>
+                <Button type="button" onClick={() => openWorkflowDialog()}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Ajouter une étape
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadingWorkflows ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : workflows.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-muted-foreground mb-4">
+                    Aucune étape de workflow définie. Ajoutez des étapes pour définir le processus de validation.
+                  </p>
+                  <Button type="button" variant="outline" onClick={() => openWorkflowDialog()}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Ajouter la première étape
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Ordre</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Rôle requis</TableHead>
+                        <TableHead>Obligatoire</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {workflows
+                        .sort((a, b) => a.order - b.order)
+                        .map((workflow) => {
+                          const role = roles.find(r => r.code === workflow.roleRequired)
+                          return (
+                            <TableRow key={workflow.id}>
+                              <TableCell className="font-mono text-sm">{workflow.order}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className={
+                                  workflow.action === 'sign' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
+                                  workflow.action === 'approve' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
+                                  workflow.action === 'review' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                  'bg-gray-500/10 text-gray-500 border-gray-500/20'
+                                }>
+                                  {workflow.action === 'validate' ? 'Valider' :
+                                   workflow.action === 'sign' ? 'Signer' :
+                                   workflow.action === 'approve' ? 'Approuver' :
+                                   'Réviser'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {role ? (
+                                  <Badge variant="outline" className="bg-purple-500/10 text-purple-500 border-purple-500/20">
+                                    {role.name} ({role.code})
+                                  </Badge>
+                                ) : workflow.roleRequired ? (
+                                  <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/20">
+                                    {workflow.roleRequired} (rôle non trouvé)
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-sm">Aucun rôle requis</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {workflow.isMandatory ? (
+                                  <Badge variant="default" className="bg-green-500/10 text-green-500 border-green-500/20">
+                                    Oui
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline">Non</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => openWorkflowDialog(workflow)}
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-destructive hover:text-destructive"
+                                    onClick={() => handleDeleteWorkflow(workflow.id)}
+                                    disabled={deletingWorkflowId === workflow.id}
+                                  >
+                                    {deletingWorkflowId === workflow.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Actions */}
           <div className="flex flex-col sm:flex-row justify-end gap-4 mt-6">
             <Link href="/dashboard/document-types">
@@ -1047,10 +1560,14 @@ export default function EditDocumentTypePage() {
                     <SelectItem value="number">Nombre</SelectItem>
                     <SelectItem value="date">Date</SelectItem>
                     <SelectItem value="datetime">Date et heure</SelectItem>
+                    <SelectItem value="time">Heure</SelectItem>
                     <SelectItem value="select">Sélection</SelectItem>
                     <SelectItem value="checkbox">Case à cocher</SelectItem>
+                    <SelectItem value="yesno">Oui/Non</SelectItem>
                     <SelectItem value="textarea">Zone de texte</SelectItem>
                     <SelectItem value="file">Fichier</SelectItem>
+                    <SelectItem value="image">Image (une seule)</SelectItem>
+                    <SelectItem value="image_multiple">Images (multiples)</SelectItem>
                     <SelectItem value="document_link">Liaison de document</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1072,10 +1589,10 @@ export default function EditDocumentTypePage() {
               </div>
             </div>
 
-            {fieldFormData.type === 'select' && (
+            {(fieldFormData.type === 'select' || fieldFormData.type === 'yesno') && (
               <div className="space-y-2">
                 <Label htmlFor="field-options">
-                  Options (JSON) <span className="text-destructive">*</span>
+                  Options (JSON) {fieldFormData.type === 'select' && <span className="text-destructive">*</span>}
                 </Label>
                 <Textarea
                   id="field-options"
@@ -1090,7 +1607,9 @@ export default function EditDocumentTypePage() {
                       })
                     }
                   }}
-                  placeholder='["Option 1", "Option 2", "Option 3"]'
+                  placeholder={fieldFormData.type === 'yesno' 
+                    ? '{"yesLabel": "Oui", "noLabel": "Non"}'
+                    : '["Option 1", "Option 2", "Option 3"]'}
                   rows={4}
                   className={fieldErrors.options ? 'border-destructive' : ''}
                 />
@@ -1101,8 +1620,65 @@ export default function EditDocumentTypePage() {
                   </p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Tableau JSON des options disponibles
+                  {fieldFormData.type === 'yesno' 
+                    ? 'JSON avec yesLabel et noLabel pour personnaliser les libellés (ex: {"yesLabel": "Conforme", "noLabel": "Non conforme"})'
+                    : 'Tableau JSON des options disponibles'}
                 </p>
+              </div>
+            )}
+
+            {(fieldFormData.type === 'image' || fieldFormData.type === 'image_multiple') && (
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/50">
+                <div className="space-y-2">
+                  <Label htmlFor="field-image-validation">
+                    Règles de validation (JSON)
+                  </Label>
+                  <Textarea
+                    id="field-image-validation"
+                    value={fieldFormData.validationRules || ''}
+                    onChange={(e) => {
+                      setFieldFormData(prev => ({ ...prev, validationRules: e.target.value }))
+                      if (fieldErrors.validationRules) {
+                        setFieldErrors(prev => {
+                          const newErrors = { ...prev }
+                          delete newErrors.validationRules
+                          return newErrors
+                        })
+                      }
+                    }}
+                    placeholder='{"accept": ["image/jpeg", "image/png", "image/webp"], "maxSize": "5mb", "maxCount": 10}'
+                    rows={4}
+                    className={fieldErrors.validationRules ? 'border-destructive' : ''}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    JSON avec accept (types MIME), maxSize (taille max), maxCount (nombre max pour image_multiple)
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="field-image-options">
+                    Options (JSON)
+                  </Label>
+                  <Textarea
+                    id="field-image-options"
+                    value={fieldFormData.options || ''}
+                    onChange={(e) => {
+                      setFieldFormData(prev => ({ ...prev, options: e.target.value }))
+                      if (fieldErrors.options) {
+                        setFieldErrors(prev => {
+                          const newErrors = { ...prev }
+                          delete newErrors.options
+                          return newErrors
+                        })
+                      }
+                    }}
+                    placeholder='{"captureMode": true, "galleryMode": true, "description": "Prendre des photos ou sélectionner depuis la galerie", "maxCount": 10}'
+                    rows={4}
+                    className={fieldErrors.options ? 'border-destructive' : ''}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    JSON avec captureMode (accès caméra), galleryMode (accès galerie), description, maxCount
+                  </p>
+                </div>
               </div>
             )}
 
@@ -1452,6 +2028,153 @@ export default function EditDocumentTypePage() {
                 <>
                   <Save className="mr-2 h-4 w-4" />
                   {editingGroup ? 'Modifier' : 'Créer'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog pour créer/modifier un workflow */}
+      <Dialog open={showWorkflowDialog} onOpenChange={setShowWorkflowDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingWorkflow ? 'Modifier l\'étape du workflow' : 'Créer une nouvelle étape'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="workflow-order">
+                  Ordre <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="workflow-order"
+                  type="number"
+                  min="1"
+                  value={workflowFormData.order}
+                  onChange={(e) => {
+                    setWorkflowFormData(prev => ({ ...prev, order: parseInt(e.target.value) || 1 }))
+                    if (workflowErrors.order) {
+                      setWorkflowErrors(prev => {
+                        const newErrors = { ...prev }
+                        delete newErrors.order
+                        return newErrors
+                      })
+                    }
+                  }}
+                  className={workflowErrors.order ? 'border-destructive' : ''}
+                />
+                {workflowErrors.order && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {workflowErrors.order}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Ordre d'exécution de l'étape (1 = première étape)
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="workflow-action">
+                  Action <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={workflowFormData.action}
+                  onValueChange={(value: DocumentWorkflow['action']) => {
+                    setWorkflowFormData(prev => ({ ...prev, action: value }))
+                  }}
+                >
+                  <SelectTrigger id="workflow-action">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="validate">Valider</SelectItem>
+                    <SelectItem value="sign">Signer</SelectItem>
+                    <SelectItem value="approve">Approuver</SelectItem>
+                    <SelectItem value="review">Réviser</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Type d'action à effectuer à cette étape
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="workflow-role">
+                Rôle requis (optionnel)
+              </Label>
+              {loadingRoles ? (
+                <Skeleton className="h-10 w-full" />
+              ) : (
+                <Select
+                  value={workflowFormData.roleRequired || 'none'}
+                  onValueChange={(value) => {
+                    setWorkflowFormData(prev => ({ ...prev, roleRequired: value === 'none' ? null : value }))
+                  }}
+                >
+                  <SelectTrigger id="workflow-role">
+                    <SelectValue placeholder="Aucun rôle requis" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Aucun rôle requis</SelectItem>
+                    {roles.map((role) => (
+                      <SelectItem key={role.id} value={role.code}>
+                        {role.name} ({role.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Sélectionnez le rôle qui doit effectuer cette action. Laissez vide si tous les utilisateurs peuvent le faire (selon les permissions).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="workflow-mandatory"
+                  checked={workflowFormData.isMandatory}
+                  onChange={(e) => setWorkflowFormData(prev => ({ ...prev, isMandatory: e.target.checked }))}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="workflow-mandatory" className="cursor-pointer">
+                  Étape obligatoire
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground ml-6">
+                Si coché, cette étape doit être complétée pour que le document soit validé
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowWorkflowDialog(false)}
+              disabled={savingWorkflow}
+            >
+              Annuler
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveWorkflow}
+              disabled={savingWorkflow}
+            >
+              {savingWorkflow ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Sauvegarde...
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  {editingWorkflow ? 'Modifier' : 'Créer'}
                 </>
               )}
             </Button>

@@ -16,7 +16,7 @@ interface DocumentSignatureDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   documentId: string
-  onSuccess?: () => void
+  onSuccess?: (updatedDocument?: any) => void | Promise<void>
 }
 
 interface SavedSignature {
@@ -273,16 +273,32 @@ export function DocumentSignatureDialog({ open, onOpenChange, documentId, onSucc
         signData.signatureName = name
       }
 
-      await api.signDocument(documentId, signData)
+      const response = await api.signDocument(documentId, signData)
 
       toast({
         title: 'Succès',
         description: 'Document signé avec succès',
       })
 
+      // Fermer le dialog immédiatement après la signature réussie
       onOpenChange(false)
+
+      // Appeler onSuccess avec les données de la réponse pour mettre à jour immédiatement
+      // Cela permettra de masquer les boutons pour l'utilisateur qui vient de signer
+      // et de les afficher pour le prochain signataire si c'est son tour
       if (onSuccess) {
-        onSuccess()
+        // Passer les données mises à jour pour une mise à jour immédiate
+        // Le backend retourne déjà le document avec le statut et les approvers mis à jour
+        if (response?.document) {
+          // Appeler onSuccess avec les données mises à jour
+          // Le composant parent pourra utiliser ces données pour mettre à jour immédiatement le state
+          ;(onSuccess as any)(response.document)
+        } else {
+          // Si les données ne sont pas dans la réponse, recharger depuis l'API
+          setTimeout(() => {
+            onSuccess()
+          }, 300)
+        }
       }
     } catch (error: any) {
       console.error('Error signing document:', error)

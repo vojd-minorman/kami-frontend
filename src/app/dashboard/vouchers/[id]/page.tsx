@@ -23,6 +23,7 @@ import {
   Users,
   Link as LinkIcon,
   ExternalLink,
+  QrCode,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useAuth } from '@/hooks/use-auth'
@@ -30,6 +31,7 @@ import { api, type Document, type DocumentType } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { DocumentSignersDialog } from '@/components/document-signers-dialog'
 import { DocumentSignatureDialog } from '@/components/document-signature-dialog'
+import type React from 'react'
 
 export default function VoucherDetailPage() {
   const router = useRouter()
@@ -52,22 +54,122 @@ export default function VoucherDetailPage() {
     }
   }, [user, documentId])
 
-  const loadDocument = async () => {
+  // Écouter les événements WebSocket pour mettre à jour le document en temps réel
+  useEffect(() => {
+    if (!user || !documentId) return
+
+    const handleDocumentSigned = (event: CustomEvent) => {
+      const signedData = event.detail
+      // Si c'est le document actuel qui a été signé, recharger
+      if (signedData.documentId === documentId) {
+        console.log('✍️ [VoucherDetail] Document signé, rechargement...', signedData)
+        loadDocument()
+      }
+    }
+
+    const handleDocumentStatusChanged = (event: CustomEvent) => {
+      const statusData = event.detail
+      // Si c'est le document actuel qui a changé de statut, recharger
+      if (statusData.documentId === documentId) {
+        console.log('📊 [VoucherDetail] Statut changé, rechargement...', statusData)
+        loadDocument()
+      }
+    }
+
+    const handleDocumentUpdated = (event: CustomEvent) => {
+      const updatedData = event.detail
+      // Si c'est le document actuel qui a été mis à jour, recharger
+      if (updatedData.documentId === documentId) {
+        console.log('🔄 [VoucherDetail] Document mis à jour, rechargement...', updatedData)
+        loadDocument()
+      }
+    }
+
+    const handleDocumentApproved = (event: CustomEvent) => {
+      const approvedData = event.detail
+      // Si c'est le document actuel qui a été approuvé, recharger
+      if (approvedData.documentId === documentId) {
+        console.log('✅ [VoucherDetail] Document approuvé, rechargement...', approvedData)
+        loadDocument()
+      }
+    }
+
+    const handleDocumentRejected = (event: CustomEvent) => {
+      const rejectedData = event.detail
+      // Si c'est le document actuel qui a été rejeté, recharger
+      if (rejectedData.documentId === documentId) {
+        console.log('❌ [VoucherDetail] Document rejeté, rechargement...', rejectedData)
+        loadDocument()
+      }
+    }
+
+    // Écouter les événements personnalisés émis par le WebSocketProvider
+    window.addEventListener('document:signed', handleDocumentSigned as EventListener)
+    window.addEventListener('document:status_changed', handleDocumentStatusChanged as EventListener)
+    window.addEventListener('document:updated', handleDocumentUpdated as EventListener)
+    window.addEventListener('document:approved', handleDocumentApproved as EventListener)
+    window.addEventListener('document:rejected', handleDocumentRejected as EventListener)
+
+    return () => {
+      window.removeEventListener('document:signed', handleDocumentSigned as EventListener)
+      window.removeEventListener('document:status_changed', handleDocumentStatusChanged as EventListener)
+      window.removeEventListener('document:updated', handleDocumentUpdated as EventListener)
+      window.removeEventListener('document:approved', handleDocumentApproved as EventListener)
+      window.removeEventListener('document:rejected', handleDocumentRejected as EventListener)
+    }
+  }, [user, documentId])
+
+  const loadDocument = async (updatedDocumentData?: any) => {
     try {
       setLoading(true)
       setError(null)
-      const documentData = await api.getDocument(documentId)
+      
+      let documentData: any
+      
+      // Si des données mises à jour sont fournies (depuis la réponse de signature), les utiliser
+      if (updatedDocumentData) {
+        documentData = updatedDocumentData
+        console.log('[VoucherDetailPage] Using updated document data from signature response')
+      } else {
+        // Sinon, charger depuis l'API
+        documentData = await api.getDocument(documentId)
+      }
       
       // Debug: Vérifier les données des approvers
       if (documentData.approvers) {
         console.log('[VoucherDetailPage] Approvers data:', documentData.approvers.map((a: any) => ({
           id: a.id,
           name: a.fullName || a.email,
-          extras: a.$extras,
-          hasSigned: a.$extras?.pivot_has_signed,
+          order: a.$extras?.pivot_order ?? a.$extras?.order ?? a.order,
+          hasSigned: a.$extras?.pivot_has_signed ?? a.$extras?.has_signed ?? a.hasSigned,
+          signedAt: a.$extras?.pivot_signed_at ?? a.$extras?.signed_at ?? a.signedAt,
         })))
       }
       
+      // Normaliser les approvers pour avoir un format cohérent
+      // Le backend retourne déjà les approvers avec $extras, donc on les garde telles quelles
+      // Mais on s'assure qu'ils ont bien la structure attendue
+      if (documentData.approvers && Array.isArray(documentData.approvers)) {
+        documentData.approvers = documentData.approvers.map((a: any) => {
+          // Si les données viennent du backend (format pivot avec $extras), les garder telles quelles
+          if (a.$extras && typeof a.$extras === 'object') {
+            return a
+          }
+          // Si les données viennent de la réponse de signature (format normalisé), reconstruire $extras
+          // Cela peut arriver si le format de réponse est différent
+          return {
+            ...a,
+            $extras: {
+              pivot_order: a.order ?? a.$extras?.pivot_order ?? 999,
+              pivot_has_signed: a.hasSigned ?? a.$extras?.pivot_has_signed ?? false,
+              pivot_signed_at: a.signedAt ?? a.$extras?.pivot_signed_at ?? null,
+              pivot_signature_method: a.signatureMethod ?? a.$extras?.pivot_signature_method ?? null,
+            },
+          }
+        })
+      }
+      
+      // Mettre à jour le document immédiatement pour que les boutons soient mis à jour
       setDocument(documentData)
       
       // Le documentType est déjà préchargé avec fields et fieldGroups par le backend
@@ -114,6 +216,100 @@ export default function VoucherDetailPage() {
     }
   }
 
+  const handleDownloadQRCode = async () => {
+    if (!document) return
+    try {
+      setProcessing(true)
+      
+      // Récupérer l'URL du QR code
+      let qrCodeUrl = document.qrCodeUrl || null
+      let qrCodeDataUrl = document.qrCode || null
+      
+      // Si on a l'URL publique, l'utiliser
+      if (qrCodeUrl) {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333'
+        const fullUrl = qrCodeUrl.startsWith('http') ? qrCodeUrl : `${apiUrl}${qrCodeUrl}`
+        
+        // Récupérer l'image depuis l'URL
+        const response = await fetch(fullUrl)
+        if (response.ok) {
+          const blob = await response.blob()
+          const url = window.URL.createObjectURL(blob)
+          const a = window.document.createElement('a')
+          a.href = url
+          a.download = `qr-code-${document.documentNumber || document.id}.png`
+          window.document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          window.document.body.removeChild(a)
+          return
+        }
+      }
+      
+      // Sinon, utiliser le data URL si disponible
+      if (qrCodeDataUrl) {
+        // Convertir le data URL en blob
+        const response = await fetch(qrCodeDataUrl)
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = window.document.createElement('a')
+        a.href = url
+        a.download = `qr-code-${document.documentNumber || document.id}.png`
+        window.document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        window.document.body.removeChild(a)
+        return
+      }
+      
+      // Si aucun QR code n'est disponible, essayer de le générer via l'API
+      try {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
+        if (!token) {
+          throw new Error('Token d\'authentification manquant')
+        }
+        
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333'
+        const response = await fetch(`${apiUrl}/api/v1/qr/${document.id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.qrCode) {
+            // Utiliser le QR code généré
+            const qrResponse = await fetch(data.qrCode)
+            const blob = await qrResponse.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = window.document.createElement('a')
+            a.href = url
+            a.download = `qr-code-${document.documentNumber || document.id}.png`
+            window.document.body.appendChild(a)
+            a.click()
+            window.URL.revokeObjectURL(url)
+            window.document.body.removeChild(a)
+            
+            // Recharger le document pour mettre à jour les données
+            await loadDocument()
+            return
+          }
+        }
+      } catch (err) {
+        console.error('Error generating QR code:', err)
+      }
+      
+      alert('QR Code non disponible pour ce document')
+    } catch (error: any) {
+      console.error('Error downloading QR code:', error)
+      const errorMessage = error?.message || 'Erreur lors du téléchargement du QR Code'
+      alert(`Erreur lors du téléchargement du QR Code: ${errorMessage}`)
+    } finally {
+      setProcessing(false)
+    }
+  }
+
   // Vérifier si l'utilisateur a déjà signé ce document
   const hasUserSigned = () => {
     if (!document || !user || !document.approvers) return false
@@ -128,39 +324,141 @@ export default function VoucherDetailPage() {
            (typeof pivot.has_signed === 'boolean' && pivot.has_signed)
   }
 
+  // Fonction helper pour vérifier si un signataire a signé
+  const hasSignerSignedHelper = (approver: any): boolean => {
+    if (!approver) return false
+    const pivot = (approver as any).$extras || {}
+    return pivot.pivot_has_signed === true || 
+           pivot.has_signed === true ||
+           (typeof pivot.pivot_has_signed === 'boolean' && pivot.pivot_has_signed) ||
+           (typeof pivot.has_signed === 'boolean' && pivot.has_signed)
+  }
+
+  // Fonction helper pour obtenir l'ordre d'un signataire
+  const getSignerOrder = (approver: any): number => {
+    if (!approver) return 999
+    const pivot = (approver as any).$extras || {}
+    return pivot.pivot_order ?? pivot.order ?? 999
+  }
+
   // Vérifier si l'utilisateur peut signer ce document
   const canUserSign = () => {
-    if (!document || !user) return false
+    if (!document || !user) {
+      console.log('[canUserSign] No document or user')
+      return false
+    }
     
     // Si l'utilisateur a déjà signé, il ne peut plus signer
-    if (hasUserSigned()) return false
+    if (hasUserSigned()) {
+      console.log('[canUserSign] User has already signed')
+      return false
+    }
+    
+    // Si le document est en DRAFT, seul le créateur peut signer (pour initialiser le processus)
+    if (document.status === 'DRAFT') {
+      const canSign = document.createdBy === user.id && !hasUserSigned()
+      console.log('[canUserSign] Document is DRAFT, creator can sign:', canSign)
+      return canSign
+    }
     
     // Si le document est en SUBMITTED ou IN_PROGRESS, vérifier si l'utilisateur est dans les signataires
     if ((document.status === 'SUBMITTED' || document.status === 'IN_PROGRESS') && document.approvers) {
       const userApprover = document.approvers.find((a: any) => a.id === user.id)
-      if (!userApprover) return false
+      if (!userApprover) {
+        console.log('[canUserSign] User is not in approvers list')
+        return false
+      }
       
-      // Vérifier si tous les signataires précédents ont signé
-      const pivot = (userApprover as any).$extras || {}
-      const userOrder = pivot.pivot_order ?? pivot.order ?? 999
-      const previousSigners = document.approvers.filter((a: any) => {
-        const aPivot = (a as any).$extras || {}
-        const aOrder = aPivot.pivot_order ?? aPivot.order ?? 999
-        return aOrder < userOrder
+      // Trier les signataires par ordre pour vérifier correctement
+      const sortedApprovers = [...document.approvers].sort((a: any, b: any) => {
+        return getSignerOrder(a) - getSignerOrder(b)
       })
       
+      console.log('[canUserSign] Sorted approvers:', sortedApprovers.map((a: any) => ({
+        id: a.id,
+        name: a.fullName || a.email,
+        order: getSignerOrder(a),
+        hasSigned: hasSignerSignedHelper(a),
+      })))
+      
+      // Trouver l'index de l'utilisateur dans la liste triée
+      const userIndex = sortedApprovers.findIndex((a: any) => a.id === user.id)
+      if (userIndex === -1) {
+        console.log('[canUserSign] User index not found')
+        return false
+      }
+      
+      console.log('[canUserSign] User index:', userIndex, 'Total approvers:', sortedApprovers.length)
+      
+      // Si c'est le premier signataire (index 0), il peut toujours signer s'il n'a pas encore signé
+      if (userIndex === 0) {
+        const canSign = !hasSignerSignedHelper(sortedApprovers[0])
+        console.log('[canUserSign] User is first signer, can sign:', canSign)
+        return canSign
+      }
+      
+      // Pour les autres signataires, vérifier que TOUS les signataires précédents ont signé
+      const previousSigners = sortedApprovers.slice(0, userIndex)
+      
+      // Si aucun signataire précédent, l'utilisateur peut signer (ne devrait pas arriver normalement)
+      if (previousSigners.length === 0) {
+        console.log('[canUserSign] No previous signers (should not happen), allowing signature')
+        return true
+      }
+      
+      // Vérifier que tous les signataires précédents ont signé
       const allPreviousSigned = previousSigners.every((a: any) => {
-        const aPivot = (a as any).$extras || {}
-        return aPivot.pivot_has_signed === true || 
-               aPivot.has_signed === true ||
-               (typeof aPivot.pivot_has_signed === 'boolean' && aPivot.pivot_has_signed) ||
-               (typeof aPivot.has_signed === 'boolean' && aPivot.has_signed)
+        const hasSigned = hasSignerSignedHelper(a)
+        console.log(`[canUserSign] Previous signer ${a.fullName || a.email} (order ${getSignerOrder(a)}): hasSigned=${hasSigned}`)
+        return hasSigned
       })
       
+      console.log('[canUserSign] All previous signers signed:', allPreviousSigned)
+      console.log('[canUserSign] Previous signers:', previousSigners.map((a: any) => ({
+        id: a.id,
+        name: a.fullName || a.email,
+        order: getSignerOrder(a),
+        hasSigned: hasSignerSignedHelper(a),
+      })))
+      
+      // L'utilisateur peut signer si tous les précédents ont signé
+      // Cela fonctionne même s'il n'y a que deux signataires (le créateur qui a déjà signé et lui-même)
       return allPreviousSigned
     }
     
+    console.log('[canUserSign] Document status:', document.status, 'does not allow signing')
     return false
+  }
+  
+  // Obtenir le message pour l'utilisateur qui ne peut pas encore signer
+  const getWaitingMessage = (): string | null => {
+    if (!document || !user || !document.approvers) return null
+    
+    const userApprover = document.approvers.find((a: any) => a.id === user.id)
+    if (!userApprover) return null
+    
+    if (hasUserSigned()) return null
+    
+    if ((document.status === 'SUBMITTED' || document.status === 'IN_PROGRESS')) {
+      // Trier les signataires par ordre
+      const sortedApprovers = [...document.approvers].sort((a: any, b: any) => {
+        return getSignerOrder(a) - getSignerOrder(b)
+      })
+      
+      const userIndex = sortedApprovers.findIndex((a: any) => a.id === user.id)
+      if (userIndex === -1 || userIndex === 0) return null
+      
+      // Trouver le premier signataire précédent qui n'a pas encore signé
+      const previousSigners = sortedApprovers.slice(0, userIndex)
+      const firstUnsigned = previousSigners.find((a: any) => !hasSignerSignedHelper(a))
+      
+      if (firstUnsigned) {
+        const name = firstUnsigned.fullName || firstUnsigned.email || 'Un signataire'
+        return `En attente de la signature de ${name}`
+      }
+    }
+    
+    return null
   }
 
   const handleSign = async () => {
@@ -294,8 +592,10 @@ export default function VoucherDetailPage() {
               )}
               Télécharger PDF
             </Button>
+            {/* Boutons pour les documents soumis ou en cours de signature */}
             {(document.status === 'SUBMITTED' || document.status === 'IN_PROGRESS') && (
               <>
+                {/* Si l'utilisateur a déjà signé, afficher un badge "Déjà signé" - les boutons doivent disparaître */}
                 {hasUserSigned() ? (
                   <Button
                     variant="outline"
@@ -305,8 +605,73 @@ export default function VoucherDetailPage() {
                     <CheckCircle2 className="mr-2 h-4 w-4" />
                     Déjà signé
                   </Button>
-                ) : canUserSign() ? (
+                ) : document.approvers && document.approvers.some((a: any) => a.id === user?.id) ? (
+                  // Si l'utilisateur est dans les signataires
+                  canUserSign() ? (
+                    // Si l'utilisateur peut signer (c'est son tour), afficher les boutons Signer et Rejeter
+                    <>
+                      <Button
+                        variant="default"
+                        onClick={handleSign}
+                        disabled={processing}
+                        className="flex-1 sm:flex-none"
+                      >
+                        {processing ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileSignature className="mr-2 h-4 w-4" />
+                        )}
+                        Signer
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={handleReject}
+                        disabled={processing}
+                        className="flex-1 sm:flex-none"
+                      >
+                        {processing ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <XCircle className="mr-2 h-4 w-4" />
+                        )}
+                        Rejeter
+                      </Button>
+                    </>
+                  ) : (
+                    // Si l'utilisateur est dans les signataires mais ce n'est pas encore son tour
+                    (() => {
+                      const waitingMessage = getWaitingMessage()
+                      return (
+                        <Button
+                          variant="outline"
+                          disabled
+                          className="flex-1 sm:flex-none"
+                          title={waitingMessage || 'En attente de votre tour de signature'}
+                        >
+                          <FileSignature className="mr-2 h-4 w-4" />
+                          {waitingMessage || 'En attente de votre tour'}
+                        </Button>
+                      )
+                    })()
+                  )
+                ) : null}
+              </>
+            )}
+            {/* Boutons pour les documents en brouillon - seul le créateur peut signer pour initialiser */}
+            {document.status === 'DRAFT' && document.createdBy === user?.id && (
+              <>
+                {!hasUserSigned() ? (
+                  // Si le créateur n'a pas encore signé, afficher les boutons pour ajouter des signataires et signer
                   <>
+                    <Button
+                      variant="outline"
+                      onClick={() => setSignersDialogOpen(true)}
+                      disabled={processing}
+                      className="flex-1 sm:flex-none"
+                    >
+                      <Users className="mr-2 h-4 w-4" />
+                      Signataires
+                    </Button>
                     <Button
                       variant="default"
                       onClick={handleSign}
@@ -318,58 +683,23 @@ export default function VoucherDetailPage() {
                       ) : (
                         <FileSignature className="mr-2 h-4 w-4" />
                       )}
-                      Signer
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={handleReject}
-                      disabled={processing}
-                      className="flex-1 sm:flex-none"
-                    >
-                      {processing ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <XCircle className="mr-2 h-4 w-4" />
-                      )}
-                      Rejeter
+                      Signer (Créateur)
                     </Button>
                   </>
-                ) : null}
+                ) : (
+                  // Si le créateur a déjà signé, afficher un badge indiquant que le document est soumis
+                  // Après la signature, le statut devrait passer à SUBMITTED, donc ce cas ne devrait plus s'afficher
+                  // Mais on le garde comme fallback au cas où le rechargement n'a pas encore eu lieu
+                  <Button
+                    variant="outline"
+                    disabled
+                    className="flex-1 sm:flex-none"
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Document soumis pour signature
+                  </Button>
+                )}
               </>
-            )}
-            {document.status === 'DRAFT' && document.createdBy === user?.id && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => setSignersDialogOpen(true)}
-                  disabled={processing}
-                  className="flex-1 sm:flex-none"
-                >
-                  <Users className="mr-2 h-4 w-4" />
-                  Signataires
-                </Button>
-                <Button
-                  variant="default"
-                  onClick={() => setSignatureDialogOpen(true)}
-                  disabled={processing}
-                  className="flex-1 sm:flex-none"
-                >
-                  <FileSignature className="mr-2 h-4 w-4" />
-                  Signer
-                </Button>
-              </>
-            )}
-            {/* Bouton pour signer si l'utilisateur est dans les signataires et peut signer */}
-            {document.status === 'DRAFT' && document.createdBy !== user?.id && (
-              <Button
-                variant="default"
-                onClick={() => setSignatureDialogOpen(true)}
-                disabled={processing}
-                className="flex-1 sm:flex-none"
-              >
-                <FileSignature className="mr-2 h-4 w-4" />
-                Signer
-              </Button>
             )}
           </div>
         </div>
@@ -492,13 +822,53 @@ export default function VoucherDetailPage() {
                   }
                   
                   // Fonction pour formater une valeur selon son type
-                  const formatValue = (value: any, fieldType?: string): string => {
+                  const formatValue = (value: any, fieldType?: string, fieldOptions?: any): React.ReactNode | string => {
                     if (value === undefined || value === null) {
                       return 'N/A'
                     }
                     
-                    if (fieldType === 'checkbox') {
-                      return value === true || value === 'true' || value === 1 || value === '1' ? 'Oui' : 'Non'
+                    if (fieldType === 'checkbox' || fieldType === 'yesno') {
+                      // Parser les options pour obtenir les labels personnalisés pour yesno
+                      let yesNoOptions: { yesLabel: string; noLabel: string } = { yesLabel: 'Oui', noLabel: 'Non' }
+                      if (fieldType === 'yesno' && fieldOptions) {
+                        if (typeof fieldOptions === 'string') {
+                          try {
+                            const parsed = JSON.parse(fieldOptions)
+                            if (parsed.yesLabel && parsed.noLabel) {
+                              yesNoOptions = parsed
+                            }
+                          } catch (e) {
+                            // Garder les valeurs par défaut
+                          }
+                        } else if (typeof fieldOptions === 'object' && fieldOptions.yesLabel && fieldOptions.noLabel) {
+                          yesNoOptions = fieldOptions
+                        }
+                      }
+                      
+                      const isYes = value === true || value === 'true' || value === 1 || value === '1' || value === 'Oui' || value === yesNoOptions.yesLabel
+                      return isYes ? yesNoOptions.yesLabel : yesNoOptions.noLabel
+                    } else if (fieldType === 'time') {
+                      // Type time : afficher l'heure
+                      if (typeof value === 'string') {
+                        // Si c'est déjà au format HH:MM, l'afficher tel quel
+                        if (/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                          return value
+                        }
+                        // Sinon, essayer de parser comme date
+                        try {
+                          const date = new Date(value)
+                          if (!isNaN(date.getTime())) {
+                            return date.toLocaleTimeString('fr-FR', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: false
+                            })
+                          }
+                        } catch (e) {
+                          // Garder la valeur originale
+                        }
+                      }
+                      return String(value)
                     } else if (fieldType === 'date' || fieldType === 'datetime') {
                       try {
                         const date = new Date(value)
@@ -516,15 +886,39 @@ export default function VoucherDetailPage() {
                       }
                     } else if (fieldType === 'number') {
                       return typeof value === 'number' ? value.toString() : String(value)
+                    } else if (fieldType === 'image') {
+                      // Type image : afficher l'image
+                      const imageUrl = typeof value === 'string' ? value : (value?.url || value?.src || '')
+                      if (!imageUrl) return 'Aucune image'
+                      
+                      return (
+                        <div className="mt-2">
+                          <img src={imageUrl} alt="Image" className="max-w-full h-auto max-h-64 rounded border" />
+                        </div>
+                      )
+                    } else if (fieldType === 'image_multiple') {
+                      // Type image_multiple : afficher toutes les images
+                      const images = Array.isArray(value) ? value : (value ? [value] : [])
+                      const imageUrls = images.map(img => typeof img === 'string' ? img : (img?.url || img?.src || '')).filter(Boolean)
+                      
+                      if (imageUrls.length === 0) return 'Aucune image'
+                      
+                      return (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mt-2">
+                          {imageUrls.map((url, index) => (
+                            <img key={index} src={url} alt={`Image ${index + 1}`} className="w-full h-32 object-cover rounded border" />
+                          ))}
+                        </div>
+                      )
                     } else if (typeof value === 'object' && !Array.isArray(value)) {
                       // Objet complexe : afficher en JSON formaté
                       try {
-                        return JSON.stringify(value, null, 2)
+                        return <pre className="text-xs bg-muted p-2 rounded overflow-auto max-w-md">{JSON.stringify(value, null, 2)}</pre>
                       } catch (e) {
                         return String(value)
                       }
                     } else if (Array.isArray(value)) {
-                      // Tableau : afficher comme liste
+                      // Tableau : afficher comme liste (sauf si c'est déjà géré par image_multiple)
                       return value.length > 0 ? value.join(', ') : 'Aucun'
                     }
                     
@@ -576,12 +970,43 @@ export default function VoucherDetailPage() {
                             
                             const fieldInfo = fieldMap.get(key)
                             const label = fieldInfo?.label || getReadableLabel(key)
-                            const displayValue = formatValue(value, fieldInfo?.type)
+                            
+                            // Obtenir les options du champ si disponible
+                            let fieldOptions = null
+                            if (documentType?.fields) {
+                              const fieldModel = documentType.fields.find((f: any) => f.name === key)
+                              if (fieldModel?.options) {
+                                fieldOptions = typeof fieldModel.options === 'string' ? JSON.parse(fieldModel.options) : fieldModel.options
+                              }
+                            }
+                            if (!fieldOptions && documentType?.fieldGroups) {
+                              for (const group of documentType.fieldGroups) {
+                                const fieldModel = group.fields?.find((f: any) => f.name === key)
+                                if (fieldModel?.options) {
+                                  fieldOptions = typeof fieldModel.options === 'string' ? JSON.parse(fieldModel.options) : fieldModel.options
+                                  break
+                                }
+                              }
+                            }
+                            
+                            const displayValue = formatValue(value, fieldInfo?.type, fieldOptions)
+                            
+                            // Pour les images, afficher différemment
+                            if (fieldInfo?.type === 'image' || fieldInfo?.type === 'image_multiple') {
+                              return (
+                                <div key={key} className="space-y-2">
+                                  <div className="flex justify-between text-sm">
+                                    <span className="text-muted-foreground">{label}:</span>
+                                  </div>
+                                  <div>{displayValue}</div>
+                                </div>
+                              )
+                            }
                             
                             return (
                               <div key={key} className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">{label}:</span>
-                                <span className="font-medium">{displayValue}</span>
+                                <span className="font-medium">{typeof displayValue === 'string' ? displayValue : String(displayValue)}</span>
                               </div>
                             )
                           })}
@@ -619,12 +1044,42 @@ export default function VoucherDetailPage() {
                                                 
                                                 const fieldInfo = fieldMap.get(fieldName)
                                                 const label = fieldInfo?.label || getReadableLabel(fieldName)
-                                                const displayValue = formatValue(fieldValue, fieldInfo?.type)
+                                                
+                                                // Obtenir les options du champ
+                                                let fieldOptions = null
+                                                if (groupInfo.fields) {
+                                                  const fieldModel = groupInfo.fields.find((f: any) => f.name === fieldName)
+                                                  if (fieldModel?.options) {
+                                                    fieldOptions = typeof fieldModel.options === 'string' ? JSON.parse(fieldModel.options) : fieldModel.options
+                                                  }
+                                                }
+                                                
+                                                const displayValue = formatValue(fieldValue, fieldInfo?.type, fieldOptions)
+                                                
+                                                // Pour les images, afficher différemment
+                                                if (fieldInfo?.type === 'image' || fieldInfo?.type === 'image_multiple') {
+                                                  return (
+                                                    <div key={fieldName} className="space-y-1">
+                                                      <div className="text-muted-foreground text-xs">{label}:</div>
+                                                      <div>{displayValue}</div>
+                                                    </div>
+                                                  )
+                                                }
+                                                
+                                                // Pour les images, afficher différemment
+                                                if (fieldInfo?.type === 'image' || fieldInfo?.type === 'image_multiple') {
+                                                  return (
+                                                    <div key={fieldName} className="space-y-1">
+                                                      <div className="text-muted-foreground text-xs">{label}:</div>
+                                                      <div>{typeof displayValue === 'string' ? displayValue : displayValue}</div>
+                                                    </div>
+                                                  )
+                                                }
                                                 
                                                 return (
                                                   <div key={fieldName} className="flex justify-between text-xs">
                                                     <span className="text-muted-foreground">{label}:</span>
-                                                    <span className="font-medium">{displayValue}</span>
+                                                    <span className="font-medium">{typeof displayValue === 'string' ? displayValue : String(displayValue)}</span>
                                                   </div>
                                                 )
                                               })}
@@ -644,12 +1099,42 @@ export default function VoucherDetailPage() {
                                           
                                           const fieldInfo = fieldMap.get(fieldName)
                                           const label = fieldInfo?.label || getReadableLabel(fieldName)
-                                          const displayValue = formatValue(fieldValue, fieldInfo?.type)
+                                          
+                                          // Obtenir les options du champ
+                                          let fieldOptions = null
+                                          if (groupInfo.fields) {
+                                            const fieldModel = groupInfo.fields.find((f: any) => f.name === fieldName)
+                                            if (fieldModel?.options) {
+                                              fieldOptions = typeof fieldModel.options === 'string' ? JSON.parse(fieldModel.options) : fieldModel.options
+                                            }
+                                          }
+                                          
+                                          const displayValue = formatValue(fieldValue, fieldInfo?.type, fieldOptions)
+                                          
+                                          // Pour les images, afficher différemment
+                                          if (fieldInfo?.type === 'image' || fieldInfo?.type === 'image_multiple') {
+                                            return (
+                                              <div key={fieldName} className="space-y-2">
+                                                <div className="text-muted-foreground text-sm">{label}:</div>
+                                                <div>{displayValue}</div>
+                                              </div>
+                                            )
+                                          }
+                                          
+                                          // Pour les images, afficher différemment
+                                          if (fieldInfo?.type === 'image' || fieldInfo?.type === 'image_multiple') {
+                                            return (
+                                              <div key={fieldName} className="space-y-2">
+                                                <div className="text-muted-foreground text-sm">{label}:</div>
+                                                <div>{displayValue}</div>
+                                              </div>
+                                            )
+                                          }
                                           
                                           return (
                                             <div key={fieldName} className="flex justify-between text-sm">
                                               <span className="text-muted-foreground">{label}:</span>
-                                              <span className="font-medium">{displayValue}</span>
+                                              <span className="font-medium">{typeof displayValue === 'string' ? displayValue : String(displayValue)}</span>
                                             </div>
                                           )
                                         })}
@@ -676,10 +1161,22 @@ export default function VoucherDetailPage() {
                             const label = getReadableLabel(key)
                             const displayValue = formatValue(value)
                             
+                            // Vérifier si c'est une URL d'image (pour les champs non mappés)
+                            const isImageUrl = typeof value === 'string' && (value.match(/\.(jpg|jpeg|png|webp|gif)$/i) || value.startsWith('http') && value.includes('/uploads/images/'))
+                            
+                            if (isImageUrl) {
+                              return (
+                                <div key={key} className="space-y-2">
+                                  <div className="text-muted-foreground text-sm">{label}:</div>
+                                  <img src={value} alt={label} className="max-w-full h-auto max-h-64 rounded border" />
+                                </div>
+                              )
+                            }
+                            
                             return (
                               <div key={key} className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">{label}:</span>
-                                <span className="font-medium">{displayValue}</span>
+                                <span className="font-medium">{typeof displayValue === 'string' ? displayValue : String(displayValue)}</span>
                               </div>
                             )
                           })}
@@ -710,6 +1207,76 @@ export default function VoucherDetailPage() {
                   <div className="text-xs text-muted-foreground mb-1">Version</div>
                   <div className="font-medium">v{document.version || 1}</div>
                 </div>
+                
+                {/* QR Code */}
+                {(document.qrCode || document.qrCodeUrl) && (
+                  <>
+                    <Separator />
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-3 flex items-center gap-2">
+                        <QrCode className="h-4 w-4" />
+                        Code QR
+                      </div>
+                      <div className="flex flex-col items-center gap-3 p-4 bg-muted/30 rounded-lg border">
+                        {/* Affichage du QR Code */}
+                        <div className="bg-white p-3 rounded-lg shadow-sm">
+                          {document.qrCodeUrl ? (
+                            <img
+                              src={
+                                document.qrCodeUrl.startsWith('http')
+                                  ? document.qrCodeUrl
+                                  : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333'}${document.qrCodeUrl}`
+                              }
+                              alt="QR Code"
+                              className="w-48 h-48 object-contain"
+                              onError={(e) => {
+                                // Fallback sur le data URL si l'URL publique échoue
+                                if (document.qrCode && e.currentTarget.src !== document.qrCode) {
+                                  e.currentTarget.src = document.qrCode
+                                }
+                              }}
+                            />
+                          ) : document.qrCode ? (
+                            <img
+                              src={document.qrCode}
+                              alt="QR Code"
+                              className="w-48 h-48 object-contain"
+                            />
+                          ) : null}
+                        </div>
+                        
+                        {/* Bouton de téléchargement */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleDownloadQRCode}
+                          disabled={processing}
+                          className="w-full"
+                        >
+                          {processing ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <Download className="mr-2 h-4 w-4" />
+                          )}
+                          Télécharger le QR Code
+                        </Button>
+                        
+                        {/* Lien vers la page d'informations du QR Code */}
+                        {document.qrToken && (
+                          <Link
+                            href={`/qr/${document.qrToken}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-muted-foreground hover:text-foreground underline flex items-center gap-1"
+                          >
+                            Voir les informations complètes
+                            <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
                 {document.approvers && document.approvers.length > 0 && (
                   <>
                     <Separator />
@@ -906,11 +1473,55 @@ export default function VoucherDetailPage() {
             />
             <DocumentSignatureDialog
               open={signatureDialogOpen}
-              onOpenChange={setSignatureDialogOpen}
+              onOpenChange={(open) => {
+                setSignatureDialogOpen(open)
+                // Si le dialog se ferme sans avoir signé (annulation), ne pas recharger
+                // (onSuccess sera appelé uniquement après une signature réussie)
+              }}
               documentId={documentId}
-              onSuccess={() => {
-                loadDocument()
-                setSignatureDialogOpen(false)
+              onSuccess={async (updatedDocumentData?: any) => {
+                // Mettre à jour le document immédiatement avec les données fournies pour que les boutons disparaissent/appaissent immédiatement
+                try {
+                  setProcessing(true)
+                  
+                  if (updatedDocumentData) {
+                    // Utiliser les données mises à jour fournies par l'API de signature
+                    // Cela permet une mise à jour immédiate sans attendre un nouveau chargement
+                    // Les boutons seront mis à jour immédiatement :
+                    // - Pour l'utilisateur qui vient de signer : les boutons "Signer" et "Rejeter" disparaissent
+                    // - Pour le prochain signataire (si c'est son tour) : le bouton "Signer" apparaît
+                    await loadDocument(updatedDocumentData)
+                    setProcessing(false)
+                    
+                    // Recharger une dernière fois après un court délai pour s'assurer que toutes les opérations backend
+                    // (génération PDF, mise à jour statut, etc.) sont terminées et synchronisées
+                    // Ce deuxième rechargement garantit que les données sont bien synchronisées
+                    // notamment pour le changement de statut DRAFT -> SUBMITTED -> IN_PROGRESS
+                    setTimeout(async () => {
+                      try {
+                        await loadDocument()
+                      } catch (error) {
+                        console.error('Error in final reload after signature:', error)
+                      }
+                    }, 400)
+                  } else {
+                    // Si pas de données fournies, recharger depuis l'API
+                    await loadDocument()
+                    setProcessing(false)
+                    
+                    // Recharger une deuxième fois pour garantir la synchronisation
+                    setTimeout(async () => {
+                      try {
+                        await loadDocument()
+                      } catch (error) {
+                        console.error('Error in second reload after signature:', error)
+                      }
+                    }, 400)
+                  }
+                } catch (error) {
+                  console.error('Error updating document after signature:', error)
+                  setProcessing(false)
+                }
               }}
             />
           </>

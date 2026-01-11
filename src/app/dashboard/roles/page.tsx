@@ -40,6 +40,7 @@ import {
 import { api } from '@/lib/api'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { PermissionGuard } from '@/components/permission-guard'
+import { usePermissions } from '@/hooks/use-permissions'
 
 interface Role {
   id: string
@@ -63,6 +64,7 @@ interface Permission {
 
 export default function RolesPage() {
   const { t } = useLocale()
+  const { hasPermission } = usePermissions()
   const [roles, setRoles] = useState<Role[]>([])
   const [permissions, setPermissions] = useState<Permission[]>([])
   const [loading, setLoading] = useState(true)
@@ -86,6 +88,24 @@ export default function RolesPage() {
     loadRoles()
     loadPermissions()
   }, [])
+
+  // Log pour surveiller l'état du bouton
+  useEffect(() => {
+    if (isEditDialogOpen || isCreateDialogOpen) {
+      const isDisabled = processing || !formData.name || (!editingRole && !formData.code)
+      console.log('[RolesPage] État du bouton Enregistrer (useEffect):', {
+        isDisabled,
+        processing,
+        hasName: !!formData.name,
+        name: formData.name,
+        hasCode: !!formData.code,
+        code: formData.code,
+        isEditing: !!editingRole,
+        editingRoleId: editingRole?.id,
+        selectedPermissionIdsLength: selectedPermissionIds.length,
+      })
+    }
+  }, [isEditDialogOpen, isCreateDialogOpen, processing, formData, editingRole, selectedPermissionIds])
 
   const loadRoles = async () => {
     try {
@@ -122,19 +142,37 @@ export default function RolesPage() {
   }
 
   const handleEdit = (role: Role) => {
-    setEditingRole(role)
-    setFormData({
-      name: role.name,
-      code: role.code,
-      description: role.description || '',
+    const permissionIds = role.permissions?.map(p => p.id) || []
+    console.log('[RolesPage.handleEdit] Ouverture du dialogue d\'édition:', {
+      roleId: role.id,
+      roleName: role.name,
+      roleCode: role.code,
+      currentPermissions: permissionIds,
+      currentPermissionsCount: permissionIds.length,
     })
-    setSelectedPermissionIds(role.permissions?.map(p => p.id) || [])
+    
+    setEditingRole(role)
+    const newFormData = {
+      name: role.name,
+      code: role.code || '',
+      description: role.description || '',
+    }
+    console.log('[RolesPage.handleEdit] FormData initialisé:', newFormData)
+    setFormData(newFormData)
+    setSelectedPermissionIds(permissionIds)
     setIsEditDialogOpen(true)
   }
 
   const handleManagePermissions = (role: Role) => {
+    const permissionIds = role.permissions?.map(p => p.id) || []
+    console.log('[RolesPage.handleManagePermissions] Ouverture du dialogue de gestion des permissions:', {
+      roleId: role.id,
+      roleName: role.name,
+      currentPermissions: permissionIds,
+      currentPermissionsCount: permissionIds.length,
+    })
     setEditingRole(role)
-    setSelectedPermissionIds(role.permissions?.map(p => p.id) || [])
+    setSelectedPermissionIds(permissionIds)
     setIsPermissionsDialogOpen(true)
   }
 
@@ -142,15 +180,34 @@ export default function RolesPage() {
     try {
       setProcessing(true)
       
+      console.log('[RolesPage.handleSaveRole] Début de la sauvegarde:', {
+        editingRole: editingRole?.id,
+        roleName: formData.name,
+        selectedPermissionIds,
+        selectedPermissionIdsLength: selectedPermissionIds.length,
+        selectedPermissionIdsType: Array.isArray(selectedPermissionIds) ? 'array' : typeof selectedPermissionIds,
+      })
+      
       if (editingRole) {
         // Mise à jour
-        await api.updateRole(editingRole.id, {
+        console.log('[RolesPage.handleSaveRole] Mise à jour du rôle:', editingRole.id)
+        console.log('[RolesPage.handleSaveRole] Données envoyées:', {
           name: formData.name,
           description: formData.description,
           permissionIds: selectedPermissionIds,
         })
+        
+        const result = await api.updateRole(editingRole.id, {
+          name: formData.name,
+          description: formData.description,
+          permissionIds: selectedPermissionIds,
+        })
+        
+        console.log('[RolesPage.handleSaveRole] Réponse du backend:', result)
+        console.log('[RolesPage.handleSaveRole] Permissions dans la réponse:', result.permissions?.map((p: any) => p.id))
       } else {
         // Création
+        console.log('[RolesPage.handleSaveRole] Création d\'un nouveau rôle')
         await api.createRole({
           name: formData.name,
           code: formData.code,
@@ -162,8 +219,14 @@ export default function RolesPage() {
       setIsEditDialogOpen(false)
       setIsCreateDialogOpen(false)
       await loadRoles()
+      console.log('[RolesPage.handleSaveRole] Sauvegarde terminée avec succès')
     } catch (error: any) {
-      console.error('Error saving role:', error)
+      console.error('[RolesPage.handleSaveRole] ERREUR lors de la sauvegarde:', error)
+      console.error('[RolesPage.handleSaveRole] Détails de l\'erreur:', {
+        message: error.message,
+        status: error.status,
+        response: error.response,
+      })
       alert(error.message || 'Erreur lors de la sauvegarde')
     } finally {
       setProcessing(false)
@@ -171,15 +234,32 @@ export default function RolesPage() {
   }
 
   const handleSavePermissions = async () => {
-    if (!editingRole) return
+    if (!editingRole) {
+      console.log('[RolesPage.handleSavePermissions] Pas de rôle en édition')
+      return
+    }
+    
+    console.log('[RolesPage.handleSavePermissions] Début de la sauvegarde:', {
+      roleId: editingRole.id,
+      roleName: editingRole.name,
+      selectedPermissionIds,
+      selectedPermissionIdsLength: selectedPermissionIds.length,
+    })
     
     try {
       setProcessing(true)
-      await api.attachRolePermissions(editingRole.id, selectedPermissionIds)
+      // Utiliser updateRole au lieu de attachRolePermissions pour remplacer complètement les permissions
+      console.log('[RolesPage.handleSavePermissions] Appel à api.updateRole avec permissionIds:', selectedPermissionIds)
+      await api.updateRole(editingRole.id, {
+        name: editingRole.name,
+        description: editingRole.description || '',
+        permissionIds: selectedPermissionIds,
+      })
+      console.log('[RolesPage.handleSavePermissions] ✅ Permissions sauvegardées avec succès')
       setIsPermissionsDialogOpen(false)
       await loadRoles()
     } catch (error: any) {
-      console.error('Error saving permissions:', error)
+      console.error('[RolesPage.handleSavePermissions] ❌ Erreur:', error)
       alert(error.message || 'Erreur lors de la sauvegarde')
     } finally {
       setProcessing(false)
@@ -209,11 +289,22 @@ export default function RolesPage() {
   }
 
   const togglePermission = (permissionId: string) => {
-    setSelectedPermissionIds(prev => 
-      prev.includes(permissionId)
+    setSelectedPermissionIds(prev => {
+      const wasSelected = prev.includes(permissionId)
+      const newIds = wasSelected
         ? prev.filter(id => id !== permissionId)
         : [...prev, permissionId]
-    )
+      
+      console.log('[RolesPage.togglePermission]', {
+        permissionId,
+        wasSelected,
+        previousCount: prev.length,
+        newCount: newIds.length,
+        newIds,
+      })
+      
+      return newIds
+    })
   }
 
   const generateCode = (name: string) => {
@@ -267,10 +358,12 @@ export default function RolesPage() {
               Créez et gérez les rôles et leurs permissions
             </p>
           </div>
-          <Button className="w-full sm:w-auto" onClick={handleCreate}>
-            <Plus className="mr-2 h-4 w-4" />
-            Créer un rôle
-          </Button>
+          {hasPermission('role.create') && (
+            <Button className="w-full sm:w-auto" onClick={handleCreate}>
+              <Plus className="mr-2 h-4 w-4" />
+              Créer un rôle
+            </Button>
+          )}
         </div>
 
         {/* Search */}
@@ -314,7 +407,7 @@ export default function RolesPage() {
                     ? 'Aucun rôle ne correspond à votre recherche'
                     : 'Aucun rôle trouvé'}
                 </p>
-                {!searchQuery && (
+                {!searchQuery && hasPermission('role.create') && (
                   <Button onClick={handleCreate}>
                     <Plus className="mr-2 h-4 w-4" />
                     Créer le premier rôle
@@ -382,34 +475,40 @@ export default function RolesPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleManagePermissions(role)}
-                              disabled={processing}
-                              title="Gérer les permissions"
-                            >
-                              <Key className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(role)}
-                              disabled={processing || role.isSystem}
-                              title="Modifier"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(role)}
-                              disabled={processing || role.isSystem}
-                              className="text-red-600 hover:text-red-700"
-                              title="Supprimer"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {hasPermission('role.update') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleManagePermissions(role)}
+                                disabled={processing}
+                                title="Gérer les permissions"
+                              >
+                                <Key className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {hasPermission('role.update') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEdit(role)}
+                                disabled={processing || role.isSystem}
+                                title="Modifier"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {hasPermission('role.delete') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(role)}
+                                disabled={processing || role.isSystem}
+                                className="text-red-600 hover:text-red-700"
+                                title="Supprimer"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -530,7 +629,18 @@ export default function RolesPage() {
             }}>
               Annuler
             </Button>
-            <Button onClick={handleSaveRole} disabled={processing || !formData.name || !formData.code}>
+            <Button 
+              onClick={() => {
+                console.log('[RolesPage] ✅✅✅ Bouton Enregistrer cliqué!', {
+                  editingRole: editingRole?.id,
+                  formData,
+                  selectedPermissionIds,
+                  selectedPermissionIdsLength: selectedPermissionIds.length,
+                })
+                handleSaveRole()
+              }} 
+              disabled={processing || !formData.name || (!editingRole && !formData.code)}
+            >
               {processing ? 'Enregistrement...' : editingRole ? 'Enregistrer' : 'Créer'}
             </Button>
           </DialogFooter>
@@ -598,7 +708,17 @@ export default function RolesPage() {
             <Button variant="outline" onClick={() => setIsPermissionsDialogOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={handleSavePermissions} disabled={processing}>
+            <Button 
+              onClick={() => {
+                console.log('[RolesPage] ✅ Bouton Enregistrer (Gestion permissions) cliqué!', {
+                  editingRole: editingRole?.id,
+                  selectedPermissionIds,
+                  selectedPermissionIdsLength: selectedPermissionIds.length,
+                })
+                handleSavePermissions()
+              }} 
+              disabled={processing}
+            >
               {processing ? 'Enregistrement...' : 'Enregistrer'}
             </Button>
           </DialogFooter>
