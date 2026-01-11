@@ -1,7 +1,7 @@
 "use client"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers, FileSignature, Tag, Shield, Key, FolderTree, Bell } from "lucide-react"
+import { LayoutDashboard, Ticket, Users, Settings, FileText, ChevronRight, LogOut, Layers, FileSignature, Tag, Shield, Key, FolderTree, Bell, FileCheck, CheckCircle2, XCircle } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -34,16 +34,29 @@ export function AppSidebar() {
       permission: undefined, // Toujours visible
     },
     {
-      title: t.nav.documents || 'Documents',
+      title: t.nav.documents || 'Liste des Documents',
       href: "/dashboard/vouchers",
       icon: Ticket,
       permission: 'document.read',
     },
+
     {
-      title: "Mes signatures",
-      href: "/dashboard/signatures",
-      icon: FileSignature,
-      permission: 'signature.read',
+      title: "En attente de signature",
+      href: "/dashboard/pending-signatures",
+      icon: FileCheck,
+      permission: 'document.sign',
+    },
+    {
+      title: "Documents signés",
+      href: "/dashboard/signed-documents",
+      icon: CheckCircle2,
+      permission: 'document.read',
+    },
+    {
+      title: "Documents rejetés",
+      href: "/dashboard/rejected-documents",
+      icon: XCircle,
+      permission: 'document.read',
     },
     {
       title: "Notifications",
@@ -55,6 +68,12 @@ export function AppSidebar() {
 
   const configItems = [
 
+    {
+      title: "Mes signatures",
+      href: "/dashboard/signatures",
+      icon: FileSignature,
+      permission: 'signature.read',
+    },
     {
       title: t.nav.configuration,
       href: "/dashboard/settings",

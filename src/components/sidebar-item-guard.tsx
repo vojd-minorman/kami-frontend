@@ -22,22 +22,42 @@ export function SidebarItemGuard({
   requireAll = false,
   hideIfNoPermission = true,
 }: SidebarItemGuardProps) {
-  const { hasPermission, hasAnyPermission, hasAllPermissions, isSuperAdmin } = usePermissions()
+  const permissionsHook = usePermissions()
+  
+  // Vérifier que le hook retourne bien les fonctions
+  if (!permissionsHook) {
+    console.error('[SidebarItemGuard] usePermissions returned undefined')
+    return null
+  }
+  
+  const { hasPermission, hasAnyPermission, hasAllPermissions, isSuperAdmin } = permissionsHook
 
-  // Super admin voit tout
-  if (isSuperAdmin()) {
-    return <>{children}</>
+  // Super admin voit tout - avec vérification de sécurité
+  if (isSuperAdmin && typeof isSuperAdmin === 'function') {
+    try {
+      if (isSuperAdmin()) {
+        return <>{children}</>
+      }
+    } catch (error) {
+      console.error('[SidebarItemGuard] Error calling isSuperAdmin:', error)
+    }
+  } else {
+    console.warn('[SidebarItemGuard] isSuperAdmin is not a function:', typeof isSuperAdmin)
   }
 
   // Vérifier les permissions
   let hasAccess = false
 
   if (permission) {
-    hasAccess = hasPermission(permission)
+    const result = hasPermission(permission)
+    // Si null, on considère qu'on n'a pas accès par sécurité
+    hasAccess = result === true
   } else if (permissions && permissions.length > 0) {
-    hasAccess = requireAll
+    const result = requireAll
       ? hasAllPermissions(permissions)
       : hasAnyPermission(permissions)
+    // Si null, on considère qu'on n'a pas accès par sécurité
+    hasAccess = result === true
   } else {
     // Si aucune permission spécifiée, autoriser l'accès
     hasAccess = true

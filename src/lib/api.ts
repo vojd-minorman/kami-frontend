@@ -419,6 +419,31 @@ class ApiClient {
   }
 
   /**
+   * Mettre à jour le profil de l'utilisateur connecté
+   */
+  async updateProfile(data: {
+    fullName?: string
+  }): Promise<User> {
+    return this.request<User>('/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
+   * Changer le mot de passe de l'utilisateur connecté
+   */
+  async changePassword(data: {
+    currentPassword: string
+    newPassword: string
+  }): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  /**
    * Déconnexion
    */
   async logout(): Promise<{ message: string }> {
@@ -502,6 +527,123 @@ class ApiClient {
     })
     
     return response
+  }
+
+  /**
+   * Récupérer les documents en attente de signature pour l'utilisateur connecté
+   */
+  async getPendingSignatures(): Promise<{
+    documents: Array<{
+      id: string
+      documentNumber: string
+      documentType: {
+        id: string
+        name: string
+      } | null
+      status: string
+      createdAt: string
+      creator: {
+        id: string
+        fullName: string
+      } | null
+      lastSigner: {
+        id: string
+        fullName: string
+        signedAt: string
+      } | null
+      totalSigners: number
+      signedCount: number
+    }>
+    count: number
+  }> {
+    return this.request('/documents/pending-signatures')
+  }
+
+  /**
+   * Récupérer les documents signés par l'utilisateur connecté
+   */
+  async getSignedDocuments(params?: {
+    page?: number
+    limit?: number
+  }): Promise<{
+    data: Array<{
+      id: string
+      documentNumber: string
+      documentType: {
+        id: string
+        name: string
+      } | null
+      status: string
+      createdAt: string
+      signedAt: string | null
+      creator: {
+        id: string
+        fullName: string
+      } | null
+      lastSigner: {
+        id: string
+        fullName: string
+        signedAt: string
+      } | null
+      totalSigners: number
+      signedCount: number
+    }>
+    meta: {
+      total: number
+      perPage: number
+      currentPage: number
+      lastPage: number
+      firstPage: number
+    }
+  }> {
+    const queryParams = new URLSearchParams()
+    if (params?.page) queryParams.append('page', params.page.toString())
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    const query = queryParams.toString()
+    return this.request(`/documents/signed${query ? `?${query}` : ''}`)
+  }
+
+  /**
+   * Récupérer les documents rejetés où l'utilisateur est impliqué
+   */
+  async getRejectedDocuments(params?: {
+    page?: number
+    limit?: number
+  }): Promise<{
+    data: Array<{
+      id: string
+      documentNumber: string
+      documentType: {
+        id: string
+        name: string
+      } | null
+      status: string
+      createdAt: string
+      creator: {
+        id: string
+        fullName: string
+      } | null
+      lastSigner: {
+        id: string
+        fullName: string
+        signedAt: string
+      } | null
+      totalSigners: number
+      signedCount: number
+    }>
+    meta: {
+      total: number
+      perPage: number
+      currentPage: number
+      lastPage: number
+      firstPage: number
+    }
+  }> {
+    const queryParams = new URLSearchParams()
+    if (params?.page) queryParams.append('page', params.page.toString())
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    const query = queryParams.toString()
+    return this.request(`/documents/rejected${query ? `?${query}` : ''}`)
   }
 
   /**
@@ -2075,6 +2217,15 @@ class ApiClient {
       method: 'POST',
     })
   }
+
+  // ==================== DASHBOARD ====================
+
+  /**
+   * Récupérer les statistiques du dashboard
+   */
+  async getDashboardStats(): Promise<DashboardStats> {
+    return this.request<DashboardStats>('/dashboard/stats')
+  }
 }
 
 export interface Notification {
@@ -2104,6 +2255,48 @@ export interface PushSubscription {
   expiresAt: string | null
   createdAt: string
   updatedAt: string | null
+}
+
+export interface DashboardStats {
+  documents: {
+    total: number
+    pending: number
+    approved: number
+    rejected: number
+    signed: number
+    draft: number
+    inProgress: number
+    expired: number
+    cancelled: number
+  }
+  documentsByType: Array<{
+    documentTypeId: string
+    documentTypeName: string
+    documentTypeCode: string
+    count: number
+  }>
+  documentsByStatus: Array<{
+    status: string
+    count: number
+  }>
+  recentDocuments: Array<{
+    id: string
+    documentNumber: string
+    documentTypeName: string
+    status: string
+    createdAt: string
+    createdByName: string
+  }>
+  activity: {
+    today: number
+    thisWeek: number
+    thisMonth: number
+  }
+  pendingActions: {
+    awaitingSignature: number
+    awaitingApproval: number
+    awaitingReview: number
+  }
 }
 
 // Export d'une instance unique du client API

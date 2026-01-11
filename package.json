@@ -54,6 +54,7 @@
     "react-dnd-html5-backend": "^16.0.1",
     "react-dom": "19.2.3",
     "react-dropzone": "^14.3.8",
+    "recharts": "^3.6.0",
     "socket.io-client": "^4.8.3",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7"

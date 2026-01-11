@@ -1,0 +1,70 @@
+# Bloquer tous les robots
+User-agent: *
+Disallow: /
+
+# Bloquer spécifiquement les archivistes et scrapers connus
+User-agent: ia_archiver
+Disallow: /
+
+User-agent: Wayback
+Disallow: /
+
+User-agent: archive.org_bot
+Disallow: /
+
+User-agent: archive.today
+Disallow: /
+
+User-agent: web.archive.org
+Disallow: /
+
+User-agent: archive.is
+Disallow: /
+
+User-agent: archive.today
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: BLEXBot
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
+
+User-agent: DataForSeoBot
+Disallow: /
+
+User-agent: MegaIndex
+Disallow: /
+
+User-agent: YandexBot
+Disallow: /
+
+User-agent: Baiduspider
+Disallow: /
+
+User-agent: Sogou
+Disallow: /
+
+User-agent: Exabot
+Disallow: /
+
+User-agent: facebot
+Disallow: /
+
+User-agent: ia_archiver
+Disallow: /
+
+# Crawl-delay pour ralentir les bots qui ignorent Disallow
+Crawl-delay: 86400

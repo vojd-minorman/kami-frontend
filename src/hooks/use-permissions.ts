@@ -1,140 +1,103 @@
-'use client'
+"use client"
 
-import { useState, useEffect, useCallback } from 'react'
-import { useAuth } from './use-auth'
-import { api } from '@/lib/api'
+import { useState, useEffect } from "react"
+import { useAuth } from "@/hooks/use-auth"
+import { api } from "@/lib/api"
 
-interface Permission {
-  id: string
-  code: string
-  name: string
-  resource?: string
-  action: string
-  documentTypeId?: string
+interface UsePermissionsReturn {
+  hasPermission: (permission: string, documentTypeId?: string) => boolean | null
+  hasAnyPermission: (permissions: string[], documentTypeId?: string) => boolean | null
+  hasAllPermissions: (permissions: string[], documentTypeId?: string) => boolean | null
+  isSuperAdmin: () => boolean
+  checking: boolean
+  userPermissions: string[] | null
 }
 
-export function usePermissions() {
-  const { user } = useAuth()
-  const [permissions, setPermissions] = useState<Permission[]>([])
-  const [loading, setLoading] = useState(true)
+export function usePermissions(): UsePermissionsReturn {
+  const { user, loading } = useAuth()
+  const [userPermissions, setUserPermissions] = useState<string[] | null>(null)
+  const [checking, setChecking] = useState(false)
 
   useEffect(() => {
-    if (user) {
-      loadPermissions()
-    } else {
-      setPermissions([])
-      setLoading(false)
+    if (loading || !user) {
+      setUserPermissions(null)
+      return
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
 
-  const loadPermissions = async () => {
+    // Pour l'instant, on retourne null car on vérifie via le backend
+    // On pourrait charger les permissions depuis l'utilisateur si disponibles
+    setUserPermissions(null)
+  }, [user, loading])
+
+  const checkPermission = async (
+    permission: string,
+    documentTypeId?: string
+  ): Promise<boolean> => {
+    if (!user) return false
+
     try {
-      setLoading(true)
-      // Récupérer les permissions de l'utilisateur via ses rôles
-      if (user?.roles && Array.isArray(user.roles) && user.roles.length > 0) {
-        const allPermissions: Permission[] = []
-        const permissionMap = new Map<string, Permission>()
-
-        for (const role of user.roles) {
-          // Vérifier si le rôle a la propriété code
-          const roleCode = role.code || role.name?.toLowerCase().replace(/\s+/g, '_')
-          
-          if (role.permissions && Array.isArray(role.permissions)) {
-            for (const perm of role.permissions) {
-              if (!permissionMap.has(perm.id)) {
-                permissionMap.set(perm.id, perm)
-                allPermissions.push(perm)
-              }
-            }
-          }
-        }
-
-        setPermissions(allPermissions)
-      }
+      const result = await api.checkPermission({
+        permission,
+        documentTypeId,
+        requireAll: false,
+      })
+      return result.hasAccess
     } catch (error) {
-      console.error('Error loading permissions:', error)
-      setPermissions([])
-    } finally {
-      setLoading(false)
+      console.error("Error checking permission:", error)
+      return false
     }
   }
 
-  const hasPermission = useCallback((permissionCode: string, documentTypeId?: string): boolean => {
+  const hasPermission = (permission: string, documentTypeId?: string): boolean | null => {
+    // Pour l'instant, on retourne null pour forcer la vérification côté backend
+    // Dans un vrai système, on pourrait vérifier localement si les permissions sont chargées
+    return null
+  }
+
+  const hasAnyPermission = (
+    permissions: string[],
+    documentTypeId?: string
+  ): boolean | null => {
+    return null
+  }
+
+  const hasAllPermissions = (
+    permissions: string[],
+    documentTypeId?: string
+  ): boolean | null => {
+    return null
+  }
+
+  const isSuperAdmin = (): boolean => {
     if (!user) return false
-    
-    // Super admin ou admin ont toutes les permissions
-    const isSuperAdmin = user.roles?.some((r: any) => {
-      const roleCode = r.code || r.name?.toLowerCase().replace(/\s+/g, '_')
-      return roleCode === 'super_admin' || roleCode === 'admin' || roleCode === 'administrateur'
-    })
-    if (isSuperAdmin) {
-      return true
+    // Vérifier si l'utilisateur a le rôle super_admin
+    // Le rôle peut être dans user.role (string) ou user.roles (array)
+    if (user.role === 'super_admin') return true
+    if (user.roles && Array.isArray(user.roles)) {
+      return user.roles.some((role: any) => 
+        (typeof role === 'string' && role === 'super_admin') ||
+        (typeof role === 'object' && (role.code === 'super_admin' || role.name === 'super_admin'))
+      )
     }
+    return false
+  }
 
-    return permissions.some((perm) => {
-      if (perm.code === permissionCode) {
-        // Si documentTypeId est fourni, vérifier que la permission correspond
-        if (documentTypeId && perm.documentTypeId) {
-          return perm.documentTypeId === documentTypeId
-        }
-        // Permission générale ou permission spécifique (si documentTypeId fourni)
-        return !perm.documentTypeId || !documentTypeId
-      }
-      return false
-    })
-  }, [user, permissions])
-
-  const hasAnyPermission = useCallback((permissionCodes: string[], documentTypeId?: string): boolean => {
-    return permissionCodes.some((code) => hasPermission(code, documentTypeId))
-  }, [hasPermission])
-
-  const hasAllPermissions = useCallback((permissionCodes: string[], documentTypeId?: string): boolean => {
-    return permissionCodes.every((code) => hasPermission(code, documentTypeId))
-  }, [hasPermission])
-
-  const hasRole = useCallback((roleCode: string): boolean => {
-    if (!user) {
-      return false
-    }
-    
-    if (!user.roles || !Array.isArray(user.roles) || user.roles.length === 0) {
-      return false
-    }
-    
-    return user.roles.some((r: any) => {
-      const rCode = r.code || r.name?.toLowerCase().replace(/\s+/g, '_')
-      return (rCode === roleCode || rCode === roleCode.toLowerCase()) && (r.isActive !== false)
-    })
-  }, [user])
-
-  const isSuperAdmin = useCallback((userToCheck?: typeof user): boolean => {
-    // Utiliser le user passé en paramètre ou celui du hook
-    const userToUse = userToCheck ?? user
-    
-    if (!userToUse) {
-      return false
-    }
-    
-    if (!userToUse.roles || !Array.isArray(userToUse.roles) || userToUse.roles.length === 0) {
-      return false
-    }
-    
-    // Vérifier directement dans les rôles
-    return userToUse.roles.some((r: any) => {
-      const rCode = r.code || r.name?.toLowerCase().replace(/\s+/g, '_')
-      return (rCode === 'super_admin' || rCode === 'admin' || rCode === 'administrateur') && (r.isActive !== false)
-    })
-  }, [user])
-
-  return {
-    permissions,
-    loading,
+  // S'assurer que toutes les fonctions sont définies et exportées correctement
+  const returnValue: UsePermissionsReturn = {
     hasPermission,
     hasAnyPermission,
     hasAllPermissions,
-    hasRole,
     isSuperAdmin,
-    reload: loadPermissions,
+    checking,
+    userPermissions,
   }
+
+  // Vérification de sécurité en développement
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    if (typeof returnValue.isSuperAdmin !== 'function') {
+      console.error('[usePermissions] isSuperAdmin is not a function:', typeof returnValue.isSuperAdmin)
+    }
+  }
+
+  return returnValue
 }

@@ -1,5 +1,5 @@
 import type React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 // import { Analytics } from "@vercel/analytics/next"
 import { ThemeProvider } from "next-themes"
 import { LocaleProvider } from "@/contexts/locale-context"
@@ -9,6 +9,24 @@ export const metadata: Metadata = {
   title: "Kas Mining",
   description: "Plateforme de Documents Numériques",
   generator: "wonorogo.com",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    noarchive: true,
+    nosnippet: true,
+    noimageindex: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noimageindex: true,
+      noarchive: true,
+      nosnippet: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'none',
+      'max-snippet': -1,
+    },
+  },
   icons: {
     icon: [
       {
@@ -26,6 +44,13 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-icon.png",
   },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 }
 
 export default function RootLayout({
